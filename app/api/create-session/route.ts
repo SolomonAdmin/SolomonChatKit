@@ -1,6 +1,7 @@
 import { WORKFLOW_ID } from "@/lib/config";
 
-export const runtime = "edge";
+// Using Node.js runtime instead of Edge Runtime for better environment variable support in Amplify
+// export const runtime = "edge";
 
 interface CreateSessionRequestBody {
   workflow?: { id?: string | null } | null;
@@ -24,11 +25,24 @@ export async function POST(request: Request): Promise<Response> {
   }
   let sessionCookie: string | null = null;
   try {
-    const openaiApiKey = process.env.LOCAL_OPENAI_API_KEY;
+    // Check both variable names for flexibility (LOCAL_OPENAI_API_KEY for local, OPENAI_API_KEY for Amplify)
+    const openaiApiKey = process.env.LOCAL_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    
+    // Debug logging to help diagnose env var issues
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[create-session] Environment variable check", {
+        hasLocalKey: !!process.env.LOCAL_OPENAI_API_KEY,
+        hasOpenAiKey: !!process.env.OPENAI_API_KEY,
+        hasApiKey: !!openaiApiKey,
+        keyLength: openaiApiKey?.length ?? 0,
+      });
+    }
+    
     if (!openaiApiKey) {
       return new Response(
         JSON.stringify({
-          error: "Missing LOCAL_OPENAI_API_KEY environment variable",
+          error: "Missing LOCAL_OPENAI_API_KEY or OPENAI_API_KEY environment variable",
+          hint: "Please set either LOCAL_OPENAI_API_KEY or OPENAI_API_KEY in your environment settings (Amplify Console or .env.local for local development)",
         }),
         {
           status: 500,
