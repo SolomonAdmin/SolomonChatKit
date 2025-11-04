@@ -6,6 +6,7 @@ interface CreateSessionRequestBody {
   workflow?: { id?: string | null } | null;
   scope?: { user_id?: string | null } | null;
   workflowId?: string | null;
+  user?: string | null;
   chatkit_configuration?: {
     file_upload?: {
       enabled?: boolean;
@@ -23,11 +24,11 @@ export async function POST(request: Request): Promise<Response> {
   }
   let sessionCookie: string | null = null;
   try {
-    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const openaiApiKey = process.env.LOCAL_OPENAI_API_KEY;
     if (!openaiApiKey) {
       return new Response(
         JSON.stringify({
-          error: "Missing OPENAI_API_KEY environment variable",
+          error: "Missing LOCAL_OPENAI_API_KEY environment variable",
         }),
         {
           status: 500,
@@ -37,14 +38,17 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const parsedBody = await safeParseJson<CreateSessionRequestBody>(request);
-    const { userId, sessionCookie: resolvedSessionCookie } =
+    const { userId: resolvedUserId, sessionCookie: resolvedSessionCookie } =
       await resolveUserId(request);
     sessionCookie = resolvedSessionCookie;
+    // Use user from request body if provided, otherwise use resolved userId from cookie
+    const userId = parsedBody?.user?.trim() || resolvedUserId;
     const resolvedWorkflowId =
       parsedBody?.workflow?.id ?? parsedBody?.workflowId ?? WORKFLOW_ID;
 
     if (process.env.NODE_ENV !== "production") {
       console.info("[create-session] handling request", {
+        userId,
         resolvedWorkflowId,
         body: JSON.stringify(parsedBody),
       });
@@ -59,8 +63,38 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
+    if (!userId || userId.trim() === "") {
+      return buildJsonResponse(
+        { error: "Missing or empty user id" },
+        400,
+        { "Content-Type": "application/json" },
+        sessionCookie
+      );
+    }
+
     const apiBase = process.env.CHATKIT_API_BASE ?? DEFAULT_CHATKIT_BASE;
     const url = `${apiBase}/v1/chatkit/sessions`;
+    const requestBody = {
+      workflow: { id: resolvedWorkflowId },
+      user: userId,
+      chatkit_configuration: {
+        file_upload: {
+          enabled:
+            parsedBody?.chatkit_configuration?.file_upload?.enabled ?? false,
+        },
+      },
+    };
+    
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[create-session] sending request to OpenAI", {
+        url,
+        workflowId: resolvedWorkflowId,
+        userId: userId,
+        hasApiKey: Boolean(openaiApiKey),
+        apiKeyLength: openaiApiKey?.length ?? 0,
+      });
+    }
+    
     const upstreamResponse = await fetch(url, {
       method: "POST",
       headers: {
@@ -68,16 +102,7 @@ export async function POST(request: Request): Promise<Response> {
         Authorization: `Bearer ${openaiApiKey}`,
         "OpenAI-Beta": "chatkit_beta=v1",
       },
-      body: JSON.stringify({
-        workflow: { id: resolvedWorkflowId },
-        user: userId,
-        chatkit_configuration: {
-          file_upload: {
-            enabled:
-              parsedBody?.chatkit_configuration?.file_upload?.enabled ?? false,
-          },
-        },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (process.env.NODE_ENV !== "production") {
@@ -93,17 +118,29 @@ export async function POST(request: Request): Promise<Response> {
 
     if (!upstreamResponse.ok) {
       const upstreamError = extractUpstreamError(upstreamJson);
+      const errorMessage = upstreamError ?? `Failed to create session: ${upstreamResponse.statusText}`;
       console.error("OpenAI ChatKit session creation failed", {
         status: upstreamResponse.status,
         statusText: upstreamResponse.statusText,
+        workflowId: resolvedWorkflowId,
+        userId: userId,
+        error: errorMessage,
         body: upstreamJson,
       });
+      
+      // Provide more helpful error messages for common issues
+      let helpfulMessage = errorMessage;
+      if (errorMessage.includes("not found")) {
+        helpfulMessage = `Workflow not found: ${resolvedWorkflowId}. Please verify: 1) The workflow ID is correct, 2) The workflow is published in Agent Builder, 3) The API key has access to this workflow in the same organization/project.`;
+      } else if (upstreamResponse.status === 401 || upstreamResponse.status === 403) {
+        helpfulMessage = `Authentication failed. Please verify your LOCAL_OPENAI_API_KEY is correct and has access to the workflow. Status: ${upstreamResponse.status}`;
+      }
+      
       return buildJsonResponse(
         {
-          error:
-            upstreamError ??
-            `Failed to create session: ${upstreamResponse.statusText}`,
+          error: helpfulMessage,
           details: upstreamJson,
+          workflowId: resolvedWorkflowId,
         },
         upstreamResponse.status,
         { "Content-Type": "application/json" },

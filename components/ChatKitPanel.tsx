@@ -185,12 +185,21 @@ export function ChatKitPanel({
       }
 
       try {
+        // Generate a user ID if not already set (using a simple UUID-like string)
+        const userId =
+          typeof window !== "undefined" &&
+          typeof window.crypto !== "undefined" &&
+          typeof window.crypto.randomUUID === "function"
+            ? window.crypto.randomUUID()
+            : `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
         const response = await fetch(CREATE_SESSION_ENDPOINT, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
+            user: userId,
             workflow: { id: WORKFLOW_ID },
             chatkit_configuration: {
               // enable attachments
@@ -324,9 +333,47 @@ export function ChatKitPanel({
       processedFacts.current.clear();
     },
     onError: ({ error }: { error: unknown }) => {
-      // Note that Chatkit UI handles errors for your users.
-      // Thus, your app code doesn't need to display errors on UI.
+      // Check for domain verification errors
+      const isDomainVerificationError =
+        error instanceof Error &&
+        (error.message.includes("DomainVerification") ||
+          error.message.includes("domain verification") ||
+          error.message.includes("401") ||
+          error.name === "DomainVerificationRequestError");
+
+      if (isDomainVerificationError) {
+        const currentOrigin =
+          typeof window !== "undefined"
+            ? window.location.origin
+            : "http://localhost:3000";
+        const errorMessage = `Domain verification required. Please add "${currentOrigin}" to your OpenAI domain allowlist at: https://platform.openai.com/settings/organization/security/domain-allowlist`;
+        
+        console.error("[ChatKitPanel] Domain verification error:", error);
+        console.error("[ChatKitPanel] Current origin:", currentOrigin);
+        console.error(
+          "[ChatKitPanel] Add this domain to allowlist:",
+          currentOrigin
+        );
+        
+        if (isMountedRef.current) {
+          setErrorState({
+            integration: errorMessage,
+            retryable: true,
+          });
+        }
+        return;
+      }
+
+      // Log other errors
       console.error("ChatKit error", error);
+      
+      // For other errors, still show them but allow retry
+      if (error instanceof Error && isMountedRef.current) {
+        setErrorState({
+          integration: error.message,
+          retryable: true,
+        });
+      }
     },
   });
 
