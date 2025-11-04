@@ -28,21 +28,35 @@ export async function POST(request: Request): Promise<Response> {
     // Check both variable names for flexibility (LOCAL_OPENAI_API_KEY for local, OPENAI_API_KEY for Amplify)
     const openaiApiKey = process.env.LOCAL_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
     
-    // Debug logging to help diagnose env var issues
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[create-session] Environment variable check", {
-        hasLocalKey: !!process.env.LOCAL_OPENAI_API_KEY,
-        hasOpenAiKey: !!process.env.OPENAI_API_KEY,
-        hasApiKey: !!openaiApiKey,
-        keyLength: openaiApiKey?.length ?? 0,
-      });
-    }
+    // Always log environment variable status (including production) for debugging in CloudWatch
+    console.info("[create-session] Environment variable check", {
+      nodeEnv: process.env.NODE_ENV,
+      hasLocalKey: !!process.env.LOCAL_OPENAI_API_KEY,
+      hasOpenAiKey: !!process.env.OPENAI_API_KEY,
+      hasApiKey: !!openaiApiKey,
+      keyLength: openaiApiKey?.length ?? 0,
+      // Log available env var keys that contain "OPENAI" or "API" (without values)
+      envKeysWithOpenAI: Object.keys(process.env).filter(k => 
+        k.includes('OPENAI') || k.includes('API')
+      ),
+    });
     
     if (!openaiApiKey) {
+      // Log all available env vars (without values) for debugging
+      const allEnvKeys = Object.keys(process.env).sort();
+      console.error("[create-session] Missing API key - available environment variables:", {
+        totalEnvVars: allEnvKeys.length,
+        sampleKeys: allEnvKeys.slice(0, 20), // First 20 for debugging
+        keysWithOpenAI: allEnvKeys.filter(k => k.includes('OPENAI') || k.includes('API')),
+      });
+      
       return new Response(
         JSON.stringify({
           error: "Missing LOCAL_OPENAI_API_KEY or OPENAI_API_KEY environment variable",
           hint: "Please set either LOCAL_OPENAI_API_KEY or OPENAI_API_KEY in your environment settings (Amplify Console or .env.local for local development)",
+          debug: process.env.NODE_ENV !== "production" ? {
+            availableEnvKeys: allEnvKeys.filter(k => k.includes('OPENAI') || k.includes('API')),
+          } : undefined,
         }),
         {
           status: 500,
