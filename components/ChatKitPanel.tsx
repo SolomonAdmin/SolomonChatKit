@@ -138,7 +138,7 @@ export function ChatKitPanel({
   useEffect(() => {
     if (!isWorkflowConfigured && isMountedRef.current) {
       setErrorState({
-        session: "Set NEXT_PUBLIC_CHATKIT_WORKFLOW_ID in your .env.local file.",
+        session: "Missing NEXT_PUBLIC_CHATKIT_WORKFLOW_ID environment variable. Please configure it in your environment settings (Amplify Console or .env.local for local development).",
         retryable: false,
       });
       setIsInitializingSession(false);
@@ -169,7 +169,7 @@ export function ChatKitPanel({
 
       if (!isWorkflowConfigured) {
         const detail =
-          "Set NEXT_PUBLIC_CHATKIT_WORKFLOW_ID in your .env.local file.";
+          "Missing NEXT_PUBLIC_CHATKIT_WORKFLOW_ID environment variable. Please configure it in your environment settings (Amplify Console or .env.local for local development).";
         if (isMountedRef.current) {
           setErrorState({ session: detail, retryable: false });
           setIsInitializingSession(false);
