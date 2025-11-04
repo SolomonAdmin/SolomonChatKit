@@ -72,6 +72,59 @@ export function ChatKitPanel({
     };
   }, []);
 
+  // Add event listeners for ChatKit widget events
+  useEffect(() => {
+    if (!isBrowser) {
+      return;
+    }
+
+    // Listen for widget-related events from ChatKit
+    const handleWidgetEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (isDev) {
+        console.info("[ChatKitPanel] Widget event received", {
+          type: event.type,
+          detail: customEvent.detail,
+        });
+      }
+    };
+
+    // Listen for tool-related events
+    const handleToolEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (isDev) {
+        console.info("[ChatKitPanel] Tool event received", {
+          type: event.type,
+          detail: customEvent.detail,
+        });
+      }
+    };
+
+    // Listen for message events that might contain widget data
+    const handleMessageEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (isDev) {
+        console.info("[ChatKitPanel] Message event received", {
+          type: event.type,
+          detail: customEvent.detail,
+        });
+      }
+    };
+
+    // Add event listeners for various ChatKit events
+    window.addEventListener("chatkit-widget", handleWidgetEvent);
+    window.addEventListener("chatkit-tool-result", handleToolEvent);
+    window.addEventListener("chatkit-message", handleMessageEvent);
+    window.addEventListener("chatkit-thread-item", handleMessageEvent);
+
+    return () => {
+      window.removeEventListener("chatkit-widget", handleWidgetEvent);
+      window.removeEventListener("chatkit-tool-result", handleToolEvent);
+      window.removeEventListener("chatkit-message", handleMessageEvent);
+      window.removeEventListener("chatkit-thread-item", handleMessageEvent);
+    };
+  }, [isDev]);
+
   useEffect(() => {
     if (!isBrowser) {
       return;
@@ -294,6 +347,14 @@ export function ChatKitPanel({
       name: string;
       params: Record<string, unknown>;
     }) => {
+      // Log all tool invocations for debugging widget support
+      if (isDev) {
+        console.info("[ChatKitPanel] Client tool invoked", {
+          name: invocation.name,
+          params: invocation.params,
+        });
+      }
+
       if (invocation.name === "switch_theme") {
         const requested = invocation.params.theme;
         if (requested === "light" || requested === "dark") {
@@ -323,7 +384,22 @@ export function ChatKitPanel({
 
       return { success: false };
     },
-    onResponseEnd: () => {
+    onResponseEnd: (response?: {
+      content?: unknown;
+      toolCalls?: Array<unknown>;
+      widgets?: Array<unknown>;
+    }) => {
+      // Enhanced logging to track widget data from tool responses
+      if (isDev && response) {
+        console.info("[ChatKitPanel] Response ended with data", {
+          hasContent: !!response.content,
+          hasToolCalls: !!response.toolCalls?.length,
+          toolCallsCount: response.toolCalls?.length ?? 0,
+          hasWidgets: !!response.widgets?.length,
+          widgetsCount: response.widgets?.length ?? 0,
+          widgets: response.widgets,
+        });
+      }
       onResponseEnd();
     },
     onResponseStart: () => {
