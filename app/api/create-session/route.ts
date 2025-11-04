@@ -29,7 +29,7 @@ function loadEnvFileIfNeeded() {
     }
     
     console.info("[create-session] Loaded .env.production file");
-  } catch (error: unknown) {
+  } catch {
     // File doesn't exist or can't be read - that's okay, env vars might be set directly
     if (process.env.NODE_ENV !== "production") {
       console.info("[create-session] .env.production not found or not readable, using process.env directly");

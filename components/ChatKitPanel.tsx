@@ -81,7 +81,7 @@ export function ChatKitPanel({
     // Listen for widget-related events from ChatKit
     const handleWidgetEvent = (event: Event) => {
       const customEvent = event as CustomEvent;
-      if (isDev) {
+      if (process.env.NODE_ENV !== "production") {
         console.info("[ChatKitPanel] Widget event received", {
           type: event.type,
           detail: customEvent.detail,
@@ -92,7 +92,7 @@ export function ChatKitPanel({
     // Listen for tool-related events
     const handleToolEvent = (event: Event) => {
       const customEvent = event as CustomEvent;
-      if (isDev) {
+      if (process.env.NODE_ENV !== "production") {
         console.info("[ChatKitPanel] Tool event received", {
           type: event.type,
           detail: customEvent.detail,
@@ -103,7 +103,7 @@ export function ChatKitPanel({
     // Listen for message events that might contain widget data
     const handleMessageEvent = (event: Event) => {
       const customEvent = event as CustomEvent;
-      if (isDev) {
+      if (process.env.NODE_ENV !== "production") {
         console.info("[ChatKitPanel] Message event received", {
           type: event.type,
           detail: customEvent.detail,
@@ -123,7 +123,7 @@ export function ChatKitPanel({
       window.removeEventListener("chatkit-message", handleMessageEvent);
       window.removeEventListener("chatkit-thread-item", handleMessageEvent);
     };
-  }, [isDev]);
+  }, []);
 
   useEffect(() => {
     if (!isBrowser) {
@@ -384,21 +384,10 @@ export function ChatKitPanel({
 
       return { success: false };
     },
-    onResponseEnd: (response?: {
-      content?: unknown;
-      toolCalls?: Array<unknown>;
-      widgets?: Array<unknown>;
-    }) => {
-      // Enhanced logging to track widget data from tool responses
-      if (isDev && response) {
-        console.info("[ChatKitPanel] Response ended with data", {
-          hasContent: !!response.content,
-          hasToolCalls: !!response.toolCalls?.length,
-          toolCallsCount: response.toolCalls?.length ?? 0,
-          hasWidgets: !!response.widgets?.length,
-          widgetsCount: response.widgets?.length ?? 0,
-          widgets: response.widgets,
-        });
+    onResponseEnd: () => {
+      // Enhanced logging to track widget data for debugging
+      if (isDev) {
+        console.info("[ChatKitPanel] Response ended - widgets should render automatically if configured in Agent Builder");
       }
       onResponseEnd();
     },

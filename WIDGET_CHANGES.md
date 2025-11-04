@@ -10,16 +10,14 @@ This document tracks all changes made to support widget display from MCP tools i
 
 #### Changes Made:
 
-**A. Enhanced `onResponseEnd` callback (Lines 326-343)**
+**A. Enhanced `onResponseEnd` callback (Lines 381-387)**
 - **Before:** Simple callback that just called `onResponseEnd()`
-- **After:** Added optional `response` parameter with enhanced logging
-- **Purpose:** Track widget data in tool responses
+- **After:** Added logging message for debugging (note: ChatKit API doesn't provide response parameter)
+- **Purpose:** Track when responses end for debugging widget support
 - **What it logs:**
-  - Whether response has content, tool calls, or widgets
-  - Counts of tool calls and widgets
-  - Full widget data array
+  - Message indicating response ended and widgets should render automatically
 
-**B. Added event listeners for ChatKit events (Lines 75-126)**
+**B. Added event listeners for ChatKit events (Lines 75-120)**
 - **New useEffect hook:** Listens for widget and tool-related events
 - **Events listened to:**
   - `chatkit-widget` - Widget-specific events
@@ -27,7 +25,7 @@ This document tracks all changes made to support widget display from MCP tools i
   - `chatkit-message` - Message events
   - `chatkit-thread-item` - Thread item events
 - **Purpose:** Capture widget data from ChatKit's internal events
-- **Logging:** All events are logged in development mode
+- **Logging:** All events are logged in development mode only (production-safe)
 
 **C. Enhanced `onClientTool` logging (Lines 350-356)**
 - **Before:** Only logged specific tools (switch_theme, record_fact)
@@ -46,18 +44,26 @@ If you need to revert these changes:
    ```
 
 2. **Remove the event listeners useEffect:**
-   - Delete lines 75-126 (the entire useEffect hook for event listeners)
+   - Delete lines 75-120 (the entire useEffect hook for event listeners)
 
 3. **Revert `onClientTool` logging:**
    - Remove lines 350-356 (the logging block at the start of onClientTool)
 
+## Build Fixes Applied
+
+- Fixed TypeScript error: `onResponseEnd` callback signature corrected (ChatKit API doesn't accept parameters)
+- Fixed unused variable warning: Removed unused `error` variable in route.ts
+- Fixed React Hook warning: Removed unnecessary `isDev` dependency from useEffect
+- Added production-safe logging: Event listeners only log in development mode
+
 ## Testing
 
 After deploying, check the browser console (in development mode) for:
-- `[ChatKitPanel] Response ended with data` - Shows widget data in responses
-- `[ChatKitPanel] Widget event received` - Shows widget-specific events
-- `[ChatKitPanel] Tool event received` - Shows tool result events
-- `[ChatKitPanel] Client tool invoked` - Shows all tool calls
+- `[ChatKitPanel] Response ended - widgets should render automatically` - Indicates response completion
+- `[ChatKitPanel] Widget event received` - Shows widget-specific events from ChatKit
+- `[ChatKitPanel] Tool event received` - Shows tool result events from ChatKit
+- `[ChatKitPanel] Message event received` - Shows message events that might contain widget data
+- `[ChatKitPanel] Client tool invoked` - Shows all tool calls with their parameters
 
 ## Notes
 
