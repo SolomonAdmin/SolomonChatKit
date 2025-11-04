@@ -18,9 +18,32 @@ frontend:
           else
             echo "✓ NEXT_PUBLIC_CHATKIT_WORKFLOW_ID is set"
           fi
+        # Create .env.production file for Next.js to read at runtime
+        # Note: For Lambda functions, env vars should be passed directly, but this provides a fallback
+        - echo "Creating .env.production file..."
+        - |
+          touch .env.production
+          if [ -n "$LOCAL_OPENAI_API_KEY" ]; then
+            echo "LOCAL_OPENAI_API_KEY=$LOCAL_OPENAI_API_KEY" >> .env.production
+            echo "✓ Added LOCAL_OPENAI_API_KEY"
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> .env.production
+            echo "✓ Added OPENAI_API_KEY"
+          fi
+          if [ -n "$NEXT_PUBLIC_CHATKIT_WORKFLOW_ID" ]; then
+            echo "NEXT_PUBLIC_CHATKIT_WORKFLOW_ID=$NEXT_PUBLIC_CHATKIT_WORKFLOW_ID" >> .env.production
+            echo "✓ Added NEXT_PUBLIC_CHATKIT_WORKFLOW_ID"
+          fi
+          if [ -n "$CHATKIT_API_BASE" ]; then
+            echo "CHATKIT_API_BASE=$CHATKIT_API_BASE" >> .env.production
+            echo "✓ Added CHATKIT_API_BASE"
+          fi
     build:
       commands:
         - npm run build
+        # Ensure .env.production is accessible (copy to .next if needed)
+        - cp .env.production .next/.env.production 2>/dev/null || true
   artifacts:
     baseDirectory: .next
     files:

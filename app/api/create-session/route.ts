@@ -1,7 +1,44 @@
 import { WORKFLOW_ID } from "@/lib/config";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 // Using Node.js runtime instead of Edge Runtime for better environment variable support in Amplify
 // export const runtime = "edge";
+
+// Load .env.production file manually if it exists (for Lambda/Amplify deployments)
+// This is needed because Lambda doesn't automatically load .env files
+function loadEnvFileIfNeeded() {
+  try {
+    // Try to load from project root (where .env.production should be)
+    const envPath = join(process.cwd(), ".env.production");
+    const envContent = readFileSync(envPath, "utf-8");
+    const lines = envContent.split("\n");
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      
+      const [key, ...valueParts] = trimmed.split("=");
+      if (key && valueParts.length > 0) {
+        const value = valueParts.join("=").trim();
+        // Only set if not already in process.env (env vars take precedence)
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+    
+    console.info("[create-session] Loaded .env.production file");
+  } catch (error: unknown) {
+    // File doesn't exist or can't be read - that's okay, env vars might be set directly
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[create-session] .env.production not found or not readable, using process.env directly");
+    }
+  }
+}
+
+// Load environment file on module load
+loadEnvFileIfNeeded();
 
 interface CreateSessionRequestBody {
   workflow?: { id?: string | null } | null;
