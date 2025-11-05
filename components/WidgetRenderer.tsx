@@ -170,7 +170,7 @@ export function parseWidgetFromText(text: string): WidgetData | null {
         data: parsed.data || {},
       };
     }
-  } catch (e) {
+  } catch {
     // Not valid JSON
   }
 

@@ -127,221 +127,6 @@ export function ChatKitPanel({
     };
   }, []);
 
-  // Widget rendering: Parse widget JSON from text messages and render widgets
-  useEffect(() => {
-    if (!isBrowser || !chatkit.control) {
-      return;
-    }
-
-    const processedMessages = new WeakSet<Node>();
-
-    const processMessageContent = (node: Node) => {
-      // Skip if already processed
-      if (processedMessages.has(node)) {
-        return;
-      }
-
-      // Only process text nodes and elements containing text
-      if (node.nodeType === Node.TEXT_NODE) {
-        const textContent = node.textContent || "";
-        const widgetData = parseWidgetFromText(textContent);
-
-        if (widgetData) {
-          if (isDev) {
-            console.info("[ChatKitPanel] Found widget JSON in message", {
-              widget: widgetData.widget,
-              data: widgetData.data,
-            });
-          }
-
-          // Find the parent element that contains this text
-          let parent = node.parentElement;
-          while (parent && !parent.classList.contains("chatkit-message-content")) {
-            parent = parent.parentElement;
-          }
-
-          if (parent) {
-            // Find the message content wrapper
-            const messageContent = parent.querySelector(".chatkit-message-content") || 
-                                   parent.querySelector('[class*="message"]') || 
-                                   parent;
-            
-            // Create a container for the widget
-            const widgetContainer = document.createElement("div");
-            widgetContainer.className = "chatkit-custom-widget my-4";
-            widgetContainer.setAttribute("data-widget-type", widgetData.widget);
-            widgetContainer.setAttribute("data-widget-data", JSON.stringify(widgetData.data));
-
-            // Render React component using createRoot
-            try {
-              const root = createRoot(widgetContainer);
-              root.render(
-                <WidgetRenderer
-                  widget={widgetData.widget}
-                  data={widgetData.data}
-                />
-              );
-              
-              // Replace the text content with the widget
-              // Find the parent element containing the text and replace its content
-              if (node.parentElement) {
-                const textParent = node.parentElement;
-                // Clear existing text and add widget
-                textParent.innerHTML = "";
-                textParent.appendChild(widgetContainer);
-                processedMessages.add(widgetContainer);
-                processedMessages.add(textParent);
-              } else {
-                // Fallback: append to message content
-                messageContent.appendChild(widgetContainer);
-                processedMessages.add(widgetContainer);
-              }
-            } catch (error) {
-              if (isDev) {
-                console.error("[ChatKitPanel] Failed to render widget:", error);
-              }
-              // Fallback: render as formatted JSON
-              widgetContainer.innerHTML = `
-                <div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800">
-                  <div class="text-sm font-semibold mb-2">Widget: ${widgetData.widget}</div>
-                  <pre class="text-xs overflow-auto">${JSON.stringify(widgetData.data, null, 2)}</pre>
-                </div>
-              `;
-              if (node.parentElement) {
-                node.parentElement.innerHTML = "";
-                node.parentElement.appendChild(widgetContainer);
-              } else {
-                messageContent.appendChild(widgetContainer);
-              }
-              processedMessages.add(widgetContainer);
-            }
-          }
-        }
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const element = node as Element;
-        const textContent = element.textContent || "";
-
-        // Skip if this element already has a widget
-        if (element.querySelector(".chatkit-custom-widget")) {
-          return;
-        }
-
-        const widgetData = parseWidgetFromText(textContent);
-        if (widgetData) {
-          if (isDev) {
-            console.info("[ChatKitPanel] Found widget JSON in element", {
-              widget: widgetData.widget,
-              data: widgetData.data,
-            });
-          }
-
-          // Check if the text content is mostly JSON (indicating it's a widget response)
-          const jsonRatio = textContent.trim().match(/^[\s\n]*\{/) ? 1 : 0;
-          
-          if (jsonRatio > 0) {
-            // Create widget container
-            const widgetContainer = document.createElement("div");
-            widgetContainer.className = "chatkit-custom-widget my-4";
-            widgetContainer.setAttribute("data-widget-type", widgetData.widget);
-            widgetContainer.setAttribute("data-widget-data", JSON.stringify(widgetData.data));
-
-            // Clear the element content and add widget
-            element.innerHTML = "";
-            element.appendChild(widgetContainer);
-            
-            // Mark as processed
-            processedMessages.add(element);
-            processedMessages.add(widgetContainer);
-
-            // Render React component using createRoot
-            try {
-              const root = createRoot(widgetContainer);
-              root.render(
-                <WidgetRenderer
-                  widget={widgetData.widget}
-                  data={widgetData.data}
-                />
-              );
-              processedMessages.add(widgetContainer);
-            } catch (error) {
-              if (isDev) {
-                console.error("[ChatKitPanel] Failed to render widget:", error);
-              }
-              // Fallback: render as formatted JSON
-              widgetContainer.innerHTML = `
-                <div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800">
-                  <div class="text-sm font-semibold mb-2">Widget: ${widgetData.widget}</div>
-                  <pre class="text-xs overflow-auto">${JSON.stringify(widgetData.data, null, 2)}</pre>
-                </div>
-              `;
-            }
-          }
-        }
-      }
-    };
-
-    // Use MutationObserver to watch for new messages in ChatKit
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          // Process the node and its children
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            const element = node as Element;
-            
-            // Look for message content in ChatKit
-            const messageElements = element.querySelectorAll?.(
-              '[class*="message"], [class*="Message"], [class*="thread-item"], [class*="ThreadItem"]'
-            ) || [];
-
-            // Process each message element
-            messageElements.forEach((msgEl) => {
-              // Process all text nodes in this message
-              const walker = document.createTreeWalker(
-                msgEl,
-                NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-                null
-              );
-
-              let textNode;
-              while ((textNode = walker.nextNode())) {
-                processMessageContent(textNode);
-              }
-            });
-
-            // Also process the element itself
-            processMessageContent(element);
-          } else {
-            processMessageContent(node);
-          }
-        });
-      });
-    });
-
-    // Start observing when ChatKit element is available
-    const startObserving = () => {
-      const chatkitElement = document.querySelector("openai-chatkit");
-      if (chatkitElement) {
-        observer.observe(chatkitElement, {
-          childList: true,
-          subtree: true,
-          characterData: true,
-        });
-        if (isDev) {
-          console.info("[ChatKitPanel] Widget observer started");
-        }
-      } else {
-        // Retry after a short delay
-        setTimeout(startObserving, 500);
-      }
-    };
-
-    startObserving();
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [chatkit.control]);
-
   useEffect(() => {
     if (!isBrowser) {
       return;
@@ -658,6 +443,221 @@ export function ChatKitPanel({
       }
     },
   });
+
+  // Widget rendering: Parse widget JSON from text messages and render widgets
+  useEffect(() => {
+    if (!isBrowser || !chatkit.control) {
+      return;
+    }
+
+    const processedMessages = new WeakSet<Node>();
+
+    const processMessageContent = (node: Node) => {
+      // Skip if already processed
+      if (processedMessages.has(node)) {
+        return;
+      }
+
+      // Only process text nodes and elements containing text
+      if (node.nodeType === Node.TEXT_NODE) {
+        const textContent = node.textContent || "";
+        const widgetData = parseWidgetFromText(textContent);
+
+        if (widgetData) {
+          if (isDev) {
+            console.info("[ChatKitPanel] Found widget JSON in message", {
+              widget: widgetData.widget,
+              data: widgetData.data,
+            });
+          }
+
+          // Find the parent element that contains this text
+          let parent = node.parentElement;
+          while (parent && !parent.classList.contains("chatkit-message-content")) {
+            parent = parent.parentElement;
+          }
+
+          if (parent) {
+            // Find the message content wrapper
+            const messageContent = parent.querySelector(".chatkit-message-content") || 
+                                   parent.querySelector('[class*="message"]') || 
+                                   parent;
+            
+            // Create a container for the widget
+            const widgetContainer = document.createElement("div");
+            widgetContainer.className = "chatkit-custom-widget my-4";
+            widgetContainer.setAttribute("data-widget-type", widgetData.widget);
+            widgetContainer.setAttribute("data-widget-data", JSON.stringify(widgetData.data));
+
+            // Render React component using createRoot
+            try {
+              const root = createRoot(widgetContainer);
+              root.render(
+                <WidgetRenderer
+                  widget={widgetData.widget}
+                  data={widgetData.data}
+                />
+              );
+              
+              // Replace the text content with the widget
+              // Find the parent element containing the text and replace its content
+              if (node.parentElement) {
+                const textParent = node.parentElement;
+                // Clear existing text and add widget
+                textParent.innerHTML = "";
+                textParent.appendChild(widgetContainer);
+                processedMessages.add(widgetContainer);
+                processedMessages.add(textParent);
+              } else {
+                // Fallback: append to message content
+                messageContent.appendChild(widgetContainer);
+                processedMessages.add(widgetContainer);
+              }
+            } catch (error) {
+              if (isDev) {
+                console.error("[ChatKitPanel] Failed to render widget:", error);
+              }
+              // Fallback: render as formatted JSON
+              widgetContainer.innerHTML = `
+                <div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <div class="text-sm font-semibold mb-2">Widget: ${widgetData.widget}</div>
+                  <pre class="text-xs overflow-auto">${JSON.stringify(widgetData.data, null, 2)}</pre>
+                </div>
+              `;
+              if (node.parentElement) {
+                node.parentElement.innerHTML = "";
+                node.parentElement.appendChild(widgetContainer);
+              } else {
+                messageContent.appendChild(widgetContainer);
+              }
+              processedMessages.add(widgetContainer);
+            }
+          }
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as Element;
+        const textContent = element.textContent || "";
+
+        // Skip if this element already has a widget
+        if (element.querySelector(".chatkit-custom-widget")) {
+          return;
+        }
+
+        const widgetData = parseWidgetFromText(textContent);
+        if (widgetData) {
+          if (isDev) {
+            console.info("[ChatKitPanel] Found widget JSON in element", {
+              widget: widgetData.widget,
+              data: widgetData.data,
+            });
+          }
+
+          // Check if the text content is mostly JSON (indicating it's a widget response)
+          const jsonRatio = textContent.trim().match(/^[\s\n]*\{/) ? 1 : 0;
+          
+          if (jsonRatio > 0) {
+            // Create widget container
+            const widgetContainer = document.createElement("div");
+            widgetContainer.className = "chatkit-custom-widget my-4";
+            widgetContainer.setAttribute("data-widget-type", widgetData.widget);
+            widgetContainer.setAttribute("data-widget-data", JSON.stringify(widgetData.data));
+
+            // Clear the element content and add widget
+            element.innerHTML = "";
+            element.appendChild(widgetContainer);
+            
+            // Mark as processed
+            processedMessages.add(element);
+            processedMessages.add(widgetContainer);
+
+            // Render React component using createRoot
+            try {
+              const root = createRoot(widgetContainer);
+              root.render(
+                <WidgetRenderer
+                  widget={widgetData.widget}
+                  data={widgetData.data}
+                />
+              );
+              processedMessages.add(widgetContainer);
+            } catch (error) {
+              if (isDev) {
+                console.error("[ChatKitPanel] Failed to render widget:", error);
+              }
+              // Fallback: render as formatted JSON
+              widgetContainer.innerHTML = `
+                <div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <div class="text-sm font-semibold mb-2">Widget: ${widgetData.widget}</div>
+                  <pre class="text-xs overflow-auto">${JSON.stringify(widgetData.data, null, 2)}</pre>
+                </div>
+              `;
+            }
+          }
+        }
+      }
+    };
+
+    // Use MutationObserver to watch for new messages in ChatKit
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          // Process the node and its children
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const element = node as Element;
+            
+            // Look for message content in ChatKit
+            const messageElements = element.querySelectorAll?.(
+              '[class*="message"], [class*="Message"], [class*="thread-item"], [class*="ThreadItem"]'
+            ) || [];
+
+            // Process each message element
+            messageElements.forEach((msgEl) => {
+              // Process all text nodes in this message
+              const walker = document.createTreeWalker(
+                msgEl,
+                NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+                null
+              );
+
+              let textNode;
+              while ((textNode = walker.nextNode())) {
+                processMessageContent(textNode);
+              }
+            });
+
+            // Also process the element itself
+            processMessageContent(element);
+          } else {
+            processMessageContent(node);
+          }
+        });
+      });
+    });
+
+    // Start observing when ChatKit element is available
+    const startObserving = () => {
+      const chatkitElement = document.querySelector("openai-chatkit");
+      if (chatkitElement) {
+        observer.observe(chatkitElement, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+        if (isDev) {
+          console.info("[ChatKitPanel] Widget observer started");
+        }
+      } else {
+        // Retry after a short delay
+        setTimeout(startObserving, 500);
+      }
+    };
+
+    startObserving();
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [chatkit.control]);
 
   const activeError = errors.session ?? errors.integration;
   const blockingError = errors.script ?? activeError;
