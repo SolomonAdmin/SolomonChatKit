@@ -667,7 +667,7 @@ export function ChatKitPanel({
     return () => {
       observer.disconnect();
     };
-  }, [chatkit.control]);
+  }, [chatkit]);
 
   const activeError = errors.session ?? errors.integration;
   const blockingError = errors.script ?? activeError;
