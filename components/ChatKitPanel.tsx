@@ -63,24 +63,9 @@ export function ChatKitPanel({
       : "pending"
   );
   const [widgetInstanceKey, setWidgetInstanceKey] = useState(0);
-  
-  // Load workflow ID from localStorage or use default
-  const [workflowId, setWorkflowId] = useState<string>(() => {
-    if (isBrowser) {
-      const saved = localStorage.getItem("chatkit_workflow_id");
-      return saved || WORKFLOW_ID;
-    }
-    return WORKFLOW_ID;
-  });
-  
+  const [workflowId, setWorkflowId] = useState<string>(WORKFLOW_ID);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [tempWorkflowId, setTempWorkflowId] = useState<string>(() => {
-    if (isBrowser) {
-      const saved = localStorage.getItem("chatkit_workflow_id");
-      return saved || WORKFLOW_ID;
-    }
-    return WORKFLOW_ID;
-  });
+  const [tempWorkflowId, setTempWorkflowId] = useState<string>(WORKFLOW_ID);
 
   const setErrorState = useCallback((updates: Partial<ErrorState>) => {
     setErrors((current) => ({ ...current, ...updates }));
@@ -231,14 +216,7 @@ export function ChatKitPanel({
   }, []);
 
   const handleWorkflowIdChange = useCallback(() => {
-    const newWorkflowId = tempWorkflowId.trim();
-    setWorkflowId(newWorkflowId);
-    
-    // Save to localStorage
-    if (isBrowser) {
-      localStorage.setItem("chatkit_workflow_id", newWorkflowId);
-    }
-    
+    setWorkflowId(tempWorkflowId.trim());
     setIsSettingsOpen(false);
     // Reset chat to re-establish connection with new workflow ID
     handleResetChat();
@@ -478,7 +456,7 @@ export function ChatKitPanel({
 
   // Widget rendering: Parse widget JSON from text messages and render widgets
   useEffect(() => {
-    if (!isBrowser || !chatkit?.control) {
+    if (!isBrowser || !chatkit.control) {
       return;
     }
 
@@ -689,7 +667,7 @@ export function ChatKitPanel({
     return () => {
       observer.disconnect();
     };
-  }, [chatkit]);
+  }, [chatkit.control]);
 
   const activeError = errors.session ?? errors.integration;
   const blockingError = errors.script ?? activeError;
@@ -697,7 +675,7 @@ export function ChatKitPanel({
   if (isDev) {
     console.debug("[ChatKitPanel] render state", {
       isInitializingSession,
-      hasControl: Boolean(chatkit?.control),
+      hasControl: Boolean(chatkit.control),
       scriptStatus,
       hasError: Boolean(blockingError),
       workflowId: workflowId,
@@ -705,7 +683,7 @@ export function ChatKitPanel({
   }
 
   return (
-    <div className="relative flex h-[85vh] md:h-[90vh] w-full rounded-3xl flex-col overflow-hidden bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-700 transition-all duration-300">
+    <div className="relative flex h-full w-full rounded-3xl flex-col overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shadow-2xl border border-white/20 dark:border-slate-700/50 transition-all duration-300">
       {/* Settings Button */}
       <button
         onClick={() => {
@@ -720,9 +698,9 @@ export function ChatKitPanel({
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
-          strokeWidth={2}
+          strokeWidth={1.5}
           stroke="currentColor"
-          className="w-5 h-5"
+          className="w-5 h-5 text-gray-700 dark:text-gray-300"
         >
           <path
             strokeLinecap="round"
@@ -740,32 +718,20 @@ export function ChatKitPanel({
       {/* Settings Modal */}
       {isSettingsOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
           onClick={() => setIsSettingsOpen(false)}
         >
           <div
-            className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 w-full max-w-lg mx-4 border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200"
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
-                Settings
-              </h2>
-              <button
-                onClick={() => setIsSettingsOpen(false)}
-                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                aria-label="Close"
-              >
-                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            <div className="mb-6">
+            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">
+              Settings
+            </h2>
+            <div className="mb-4">
               <label
                 htmlFor="workflow-id"
-                className="block text-sm font-semibold mb-3 text-slate-700 dark:text-slate-300"
+                className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300"
               >
                 Workflow ID
               </label>
@@ -775,23 +741,22 @@ export function ChatKitPanel({
                 value={tempWorkflowId}
                 onChange={(e) => setTempWorkflowId(e.target.value)}
                 placeholder="wf_..."
-                className="w-full px-4 py-3 border-2 border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                Changing this will restart the chat session with the new workflow. Your preference will be saved.
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Changing this will restart the chat session with the new workflow.
               </p>
             </div>
-            
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setIsSettingsOpen(false)}
-                className="px-6 py-3 text-sm font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-all duration-200"
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-slate-700 rounded-md hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleWorkflowIdChange}
-                className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl hover:from-blue-700 hover:to-blue-800 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
               >
                 Save & Restart
               </button>
@@ -802,7 +767,7 @@ export function ChatKitPanel({
 
       <ChatKit
         key={widgetInstanceKey}
-        control={chatkit?.control}
+        control={chatkit.control}
         className={
           blockingError || isInitializingSession
             ? "pointer-events-none opacity-0"

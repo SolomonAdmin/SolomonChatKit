@@ -25,7 +25,7 @@ export const getThemeConfig = (theme: ColorScheme): ThemeOption => ({
       shade: theme === "dark" ? -1 : -4,
     },
     accent: {
-      primary: theme === "dark" ? "#3b82f6" : "#2563eb",
+      primary: theme === "dark" ? "#f1f5f9" : "#0f172a",
       level: 1,
     },
   },
