@@ -456,7 +456,7 @@ export function ChatKitPanel({
 
   // Widget rendering: Parse widget JSON from text messages and render widgets
   useEffect(() => {
-    if (!isBrowser || !chatkit.control) {
+    if (!isBrowser || !chatkit?.control) {
       return;
     }
 
@@ -675,7 +675,7 @@ export function ChatKitPanel({
   if (isDev) {
     console.debug("[ChatKitPanel] render state", {
       isInitializingSession,
-      hasControl: Boolean(chatkit.control),
+      hasControl: Boolean(chatkit?.control),
       scriptStatus,
       hasError: Boolean(blockingError),
       workflowId: workflowId,
@@ -767,7 +767,7 @@ export function ChatKitPanel({
 
       <ChatKit
         key={widgetInstanceKey}
-        control={chatkit.control}
+        control={chatkit?.control}
         className={
           blockingError || isInitializingSession
             ? "pointer-events-none opacity-0"
