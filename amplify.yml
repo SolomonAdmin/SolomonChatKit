@@ -3,6 +3,9 @@ frontend:
   phases:
     preBuild:
       commands:
+        - nvm install 20
+        - nvm use 20
+        - node -v
         - npm ci --cache .npm --prefer-offline
         # Verify environment variables are available (without exposing values)
         - echo "Checking environment variables..."
