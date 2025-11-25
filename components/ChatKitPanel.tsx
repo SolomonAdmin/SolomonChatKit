@@ -63,6 +63,9 @@ export function ChatKitPanel({
       : "pending"
   );
   const [widgetInstanceKey, setWidgetInstanceKey] = useState(0);
+  const [workflowId, setWorkflowId] = useState<string>(WORKFLOW_ID);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [tempWorkflowId, setTempWorkflowId] = useState<string>(WORKFLOW_ID);
 
   const setErrorState = useCallback((updates: Partial<ErrorState>) => {
     setErrors((current) => ({ ...current, ...updates }));
@@ -187,13 +190,13 @@ export function ChatKitPanel({
   }, [scriptStatus, setErrorState]);
 
   const isWorkflowConfigured = Boolean(
-    WORKFLOW_ID && !WORKFLOW_ID.startsWith("wf_replace")
+    workflowId && !workflowId.startsWith("wf_replace")
   );
 
   useEffect(() => {
     if (!isWorkflowConfigured && isMountedRef.current) {
       setErrorState({
-        session: "Missing NEXT_PUBLIC_CHATKIT_WORKFLOW_ID environment variable. Please configure it in your environment settings (Amplify Console or .env.local for local development).",
+        session: "Missing Workflow ID. Please configure it in Settings.",
         retryable: false,
       });
       setIsInitializingSession(false);
@@ -212,19 +215,26 @@ export function ChatKitPanel({
     setWidgetInstanceKey((prev) => prev + 1);
   }, []);
 
+  const handleWorkflowIdChange = useCallback(() => {
+    setWorkflowId(tempWorkflowId.trim());
+    setIsSettingsOpen(false);
+    // Reset chat to re-establish connection with new workflow ID
+    handleResetChat();
+  }, [tempWorkflowId, handleResetChat]);
+
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
       if (isDev) {
         console.info("[ChatKitPanel] getClientSecret invoked", {
           currentSecretPresent: Boolean(currentSecret),
-          workflowId: WORKFLOW_ID,
+          workflowId: workflowId,
           endpoint: CREATE_SESSION_ENDPOINT,
         });
       }
 
       if (!isWorkflowConfigured) {
         const detail =
-          "Missing NEXT_PUBLIC_CHATKIT_WORKFLOW_ID environment variable. Please configure it in your environment settings (Amplify Console or .env.local for local development).";
+          "Missing Workflow ID. Please configure it in Settings.";
         if (isMountedRef.current) {
           setErrorState({ session: detail, retryable: false });
           setIsInitializingSession(false);
@@ -255,7 +265,7 @@ export function ChatKitPanel({
           },
           body: JSON.stringify({
             user: userId,
-            workflow: { id: WORKFLOW_ID },
+            workflow: { id: workflowId },
             chatkit_configuration: {
               // enable attachments
               file_upload: {
@@ -322,7 +332,7 @@ export function ChatKitPanel({
         }
       }
     },
-    [isWorkflowConfigured, setErrorState]
+    [isWorkflowConfigured, setErrorState, workflowId]
   );
 
   const chatkit = useChatKit({
@@ -668,12 +678,93 @@ export function ChatKitPanel({
       hasControl: Boolean(chatkit.control),
       scriptStatus,
       hasError: Boolean(blockingError),
-      workflowId: WORKFLOW_ID,
+      workflowId: workflowId,
     });
   }
 
   return (
     <div className="relative pb-8 flex h-[90vh] w-full rounded-2xl flex-col overflow-hidden bg-white shadow-sm transition-colors dark:bg-slate-900">
+      {/* Settings Button */}
+      <button
+        onClick={() => {
+          setTempWorkflowId(workflowId);
+          setIsSettingsOpen(true);
+        }}
+        className="absolute top-4 right-4 z-50 p-2 rounded-lg bg-white dark:bg-slate-800 shadow-md hover:shadow-lg transition-shadow border border-gray-200 dark:border-gray-700"
+        aria-label="Settings"
+        title="Settings"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth={1.5}
+          stroke="currentColor"
+          className="w-5 h-5 text-gray-700 dark:text-gray-300"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"
+          />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+          />
+        </svg>
+      </button>
+
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          onClick={() => setIsSettingsOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">
+              Settings
+            </h2>
+            <div className="mb-4">
+              <label
+                htmlFor="workflow-id"
+                className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300"
+              >
+                Workflow ID
+              </label>
+              <input
+                id="workflow-id"
+                type="text"
+                value={tempWorkflowId}
+                onChange={(e) => setTempWorkflowId(e.target.value)}
+                placeholder="wf_..."
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Changing this will restart the chat session with the new workflow.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-slate-700 rounded-md hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleWorkflowIdChange}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Save & Restart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ChatKit
         key={widgetInstanceKey}
         control={chatkit.control}
