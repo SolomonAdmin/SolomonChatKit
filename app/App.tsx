@@ -7,7 +7,6 @@ import { ThreadList } from "@/components/ThreadList";
 
 export default function App() {
   const { scheme, setScheme } = useColorScheme();
-  const [showThreadList, setShowThreadList] = useState(false);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -50,7 +49,7 @@ export default function App() {
     <main className="h-screen w-screen flex flex-col overflow-hidden bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 dark:from-slate-900 dark:via-blue-900 dark:to-indigo-900">
       {/* Sleek Header with Logos */}
       <header className="flex-shrink-0 px-6 py-4 bg-gradient-to-r from-blue-900/90 via-blue-800/90 to-indigo-900/90 backdrop-blur-sm border-b border-blue-700/30 dark:border-blue-600/20">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+        <div className="max-w-full mx-auto flex items-center justify-between">
           {/* Left: Solomon Consulting Group Logo */}
           <div className="flex items-center gap-3">
             {/* TODO: Replace with actual Solomon logo image */}
@@ -85,30 +84,30 @@ export default function App() {
         </div>
       </header>
 
-      {/* Chat Panel - Full Height, No Wasted Space */}
-      <div className="flex-1 overflow-hidden p-4 md:p-6">
-        <div className="h-full max-w-7xl mx-auto">
-          <ChatKitPanel
-            theme={scheme}
-            onWidgetAction={handleWidgetAction}
-            onResponseEnd={handleResponseEnd}
-            onThemeRequest={setScheme}
-            onShowThreadList={() => setShowThreadList(true)}
+      {/* Main Content Area - Sidebar + Chat */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* Left Sidebar - Thread List */}
+        {userId && (
+          <ThreadList
+            userId={userId}
+            currentThreadId={currentThreadId}
+            onSelectThread={handleSelectThread}
+            onNewThread={handleNewThread}
           />
+        )}
+
+        {/* Right Side - Chat Panel */}
+        <div className="flex-1 overflow-hidden p-4 md:p-6">
+          <div className="h-full max-w-7xl mx-auto">
+            <ChatKitPanel
+              theme={scheme}
+              onWidgetAction={handleWidgetAction}
+              onResponseEnd={handleResponseEnd}
+              onThemeRequest={setScheme}
+            />
+          </div>
         </div>
       </div>
-
-      {/* Thread List Sidebar */}
-      {userId && (
-        <ThreadList
-          userId={userId}
-          currentThreadId={currentThreadId}
-          onSelectThread={handleSelectThread}
-          onNewThread={handleNewThread}
-          isOpen={showThreadList}
-          onClose={() => setShowThreadList(false)}
-        />
-      )}
     </main>
   );
 }
