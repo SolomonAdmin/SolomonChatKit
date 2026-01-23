@@ -14,6 +14,8 @@ import {
 import { ErrorOverlay } from "./ErrorOverlay";
 import type { ColorScheme } from "@/hooks/useColorScheme";
 import { parseWidgetFromText, WidgetRenderer } from "./WidgetRenderer";
+import { threadStorage } from "@/lib/storage";
+import type { ChatThread } from "@/lib/storage";
 
 export type FactAction = {
   type: "save";
@@ -26,6 +28,7 @@ type ChatKitPanelProps = {
   onWidgetAction: (action: FactAction) => Promise<void>;
   onResponseEnd: () => void;
   onThemeRequest: (scheme: ColorScheme) => void;
+  onShowThreadList?: () => void;
 };
 
 type ErrorState = {
@@ -50,6 +53,7 @@ export function ChatKitPanel({
   onWidgetAction,
   onResponseEnd,
   onThemeRequest,
+  onShowThreadList,
 }: ChatKitPanelProps) {
   const processedFacts = useRef(new Set<string>());
   const [errors, setErrors] = useState<ErrorState>(() => createInitialErrors());
@@ -63,9 +67,10 @@ export function ChatKitPanel({
       : "pending"
   );
   const [widgetInstanceKey, setWidgetInstanceKey] = useState(0);
-  const [workflowId, setWorkflowId] = useState<string>(WORKFLOW_ID);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [tempWorkflowId, setTempWorkflowId] = useState<string>(WORKFLOW_ID);
+  const [workflowId] = useState<string>(WORKFLOW_ID);
+  const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const firstMessageRef = useRef<string | null>(null);
 
   const setErrorState = useCallback((updates: Partial<ErrorState>) => {
     setErrors((current) => ({ ...current, ...updates }));
@@ -75,6 +80,24 @@ export function ChatKitPanel({
     return () => {
       isMountedRef.current = false;
     };
+  }, []);
+
+  // Load userId from localStorage or generate new one
+  useEffect(() => {
+    if (!isBrowser) return;
+    
+    const storedUserId = localStorage.getItem("chatkit_user_id");
+    if (storedUserId) {
+      setUserId(storedUserId);
+    } else {
+      const newUserId =
+        typeof window.crypto !== "undefined" &&
+        typeof window.crypto.randomUUID === "function"
+          ? window.crypto.randomUUID()
+          : `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem("chatkit_user_id", newUserId);
+      setUserId(newUserId);
+    }
   }, []);
 
   // Add event listeners for ChatKit widget events
@@ -215,12 +238,6 @@ export function ChatKitPanel({
     setWidgetInstanceKey((prev) => prev + 1);
   }, []);
 
-  const handleWorkflowIdChange = useCallback(() => {
-    setWorkflowId(tempWorkflowId.trim());
-    setIsSettingsOpen(false);
-    // Reset chat to re-establish connection with new workflow ID
-    handleResetChat();
-  }, [tempWorkflowId, handleResetChat]);
 
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
@@ -250,13 +267,23 @@ export function ChatKitPanel({
       }
 
       try {
-        // Generate a user ID if not already set (using a simple UUID-like string)
-        const userId =
-          typeof window !== "undefined" &&
+        // Use stored userId or generate new one
+        const currentUserId = userId || 
+          (typeof window !== "undefined" &&
           typeof window.crypto !== "undefined" &&
           typeof window.crypto.randomUUID === "function"
             ? window.crypto.randomUUID()
-            : `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            : `user_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+        
+        if (!userId && currentUserId) {
+          localStorage.setItem("chatkit_user_id", currentUserId);
+          setUserId(currentUserId);
+        }
+
+        // Generate thread ID for this conversation
+        const threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        setCurrentThreadId(threadId);
+        firstMessageRef.current = null;
 
         const response = await fetch(CREATE_SESSION_ENDPOINT, {
           method: "POST",
@@ -311,6 +338,22 @@ export function ChatKitPanel({
           throw new Error("Missing client secret in response");
         }
 
+        // Save thread when session is created
+        if (currentThreadId && currentUserId) {
+          const thread: ChatThread = {
+            threadId: currentThreadId,
+            userId: currentUserId,
+            title: "New Conversation",
+            createdAt: Date.now(),
+            lastMessageAt: Date.now(),
+            workflowId: workflowId,
+          };
+          
+          threadStorage.saveThread(thread).catch(err => {
+            if (isDev) console.error("[ChatKitPanel] Failed to save thread:", err);
+          });
+        }
+
         if (isMountedRef.current) {
           setErrorState({ session: null, integration: null });
         }
@@ -332,7 +375,7 @@ export function ChatKitPanel({
         }
       }
     },
-    [isWorkflowConfigured, setErrorState, workflowId]
+    [isWorkflowConfigured, setErrorState, workflowId, userId]
   );
 
   const chatkit = useChatKit({
@@ -453,6 +496,59 @@ export function ChatKitPanel({
       }
     },
   });
+
+  // Track user messages to update thread titles
+  useEffect(() => {
+    if (!isBrowser || !chatkit.control || !currentThreadId || !userId) {
+      return;
+    }
+
+    const updateThreadFromMessage = (messageText: string) => {
+      if (!firstMessageRef.current && messageText.trim()) {
+        firstMessageRef.current = messageText;
+        const title = messageText.length > 50 ? messageText.slice(0, 50) + "..." : messageText;
+        
+        threadStorage.updateThread(currentThreadId!, {
+          title: title,
+          lastMessagePreview: messageText.slice(0, 100),
+        }).catch(err => {
+          if (isDev) console.error("[ChatKitPanel] Failed to update thread title:", err);
+        });
+      }
+    };
+
+    // Watch for user messages in ChatKit
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const element = node as Element;
+            // Look for user messages (typically have specific classes or attributes)
+            const userMessages = element.querySelectorAll?.('[class*="user"], [class*="User"], [data-role="user"]') || [];
+            userMessages.forEach((msgEl) => {
+              const text = msgEl.textContent?.trim();
+              if (text && text.length > 0) {
+                updateThreadFromMessage(text);
+              }
+            });
+          }
+        });
+      });
+    });
+
+    const chatkitElement = document.querySelector("openai-chatkit");
+    if (chatkitElement) {
+      observer.observe(chatkitElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [chatkit.control, currentThreadId, userId]);
 
   // Widget rendering: Parse widget JSON from text messages and render widgets
   useEffect(() => {
@@ -684,87 +780,31 @@ export function ChatKitPanel({
 
   return (
     <div className="relative flex h-full w-full rounded-3xl flex-col overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shadow-2xl border border-white/20 dark:border-slate-700/50 transition-all duration-300">
-      {/* Settings Button */}
-      <button
-        onClick={() => {
-          setTempWorkflowId(workflowId);
-          setIsSettingsOpen(true);
-        }}
-        className="absolute top-5 right-5 z-50 p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-        aria-label="Settings"
-        title="Settings"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={1.5}
-          stroke="currentColor"
-          className="w-5 h-5 text-gray-700 dark:text-gray-300"
+      {/* History Button */}
+      {onShowThreadList && (
+        <button
+          onClick={onShowThreadList}
+          className="absolute top-5 right-5 z-50 p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+          aria-label="Chat History"
+          title="Chat History"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"
-          />
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-          />
-        </svg>
-      </button>
-
-      {/* Settings Modal */}
-      {isSettingsOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-          onClick={() => setIsSettingsOpen(false)}
-        >
-          <div
-            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4"
-            onClick={(e) => e.stopPropagation()}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={1.5}
+            stroke="currentColor"
+            className="w-5 h-5"
           >
-            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">
-              Settings
-            </h2>
-            <div className="mb-4">
-              <label
-                htmlFor="workflow-id"
-                className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300"
-              >
-                Workflow ID
-              </label>
-              <input
-                id="workflow-id"
-                type="text"
-                value={tempWorkflowId}
-                onChange={(e) => setTempWorkflowId(e.target.value)}
-                placeholder="wf_..."
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-slate-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Changing this will restart the chat session with the new workflow.
-              </p>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setIsSettingsOpen(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-slate-700 rounded-md hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleWorkflowIdChange}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Save & Restart
-              </button>
-            </div>
-          </div>
-        </div>
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+        </button>
       )}
-
+      
       <ChatKit
         key={widgetInstanceKey}
         control={chatkit.control}
