@@ -22,12 +22,6 @@ export function ThreadList({
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
 
-  useEffect(() => {
-    if (userId) {
-      loadThreads();
-    }
-  }, [userId, currentThreadId]); // Reload when current thread changes
-
   const loadThreads = useCallback(async () => {
     if (!userId) return;
     setIsLoading(true);
@@ -40,6 +34,12 @@ export function ThreadList({
       setIsLoading(false);
     }
   }, [userId]);
+
+  useEffect(() => {
+    if (userId) {
+      loadThreads();
+    }
+  }, [userId, currentThreadId, loadThreads]); // Reload when current thread changes
 
   const handleDeleteThread = async (threadId: string, e: React.MouseEvent) => {
     e.stopPropagation();

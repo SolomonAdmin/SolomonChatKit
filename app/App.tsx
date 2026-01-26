@@ -22,12 +22,21 @@ export default function App() {
     }
   }, []);
 
-  // Load userId from localStorage
+  // Load userId from localStorage or generate new one
   useEffect(() => {
     if (typeof window !== "undefined") {
       const storedUserId = localStorage.getItem("chatkit_user_id");
       if (storedUserId) {
         setUserId(storedUserId);
+      } else {
+        // Generate new userId if one doesn't exist
+        const newUserId =
+          typeof window.crypto !== "undefined" &&
+          typeof window.crypto.randomUUID === "function"
+            ? window.crypto.randomUUID()
+            : `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        localStorage.setItem("chatkit_user_id", newUserId);
+        setUserId(newUserId);
       }
     }
   }, []);
