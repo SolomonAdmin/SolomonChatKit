@@ -23,10 +23,15 @@ export function ThreadList({
   const [editTitle, setEditTitle] = useState("");
 
   const loadThreads = useCallback(async () => {
-    if (!userId) return;
+    if (!userId) {
+      console.log("[ThreadList] No userId, skipping load");
+      return;
+    }
     setIsLoading(true);
     try {
+      console.log("[ThreadList] Loading threads for userId:", userId);
       const userThreads = await threadStorage.getUserThreads(userId);
+      console.log("[ThreadList] Loaded threads:", userThreads.length, userThreads);
       setThreads(userThreads);
     } catch (error) {
       console.error("[ThreadList] Failed to load threads:", error);

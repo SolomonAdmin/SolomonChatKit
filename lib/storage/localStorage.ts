@@ -16,6 +16,12 @@ export class LocalStorageThreadStorage implements ThreadStorage {
     if (typeof window === "undefined") return;
     
     try {
+      console.log("[LocalStorage] Saving thread:", {
+        threadId: thread.threadId,
+        userId: thread.userId,
+        title: thread.title,
+      });
+      
       // Save thread data
       localStorage.setItem(this.getStorageKey(thread.threadId), JSON.stringify(thread));
       
@@ -35,6 +41,8 @@ export class LocalStorageThreadStorage implements ThreadStorage {
       // Store user's thread list
       const userThreadsKey = `${USER_THREADS_KEY}_${thread.userId}`;
       localStorage.setItem(userThreadsKey, JSON.stringify(userThreads.map(t => t.threadId)));
+      
+      console.log("[LocalStorage] Thread saved, user now has", userThreads.length, "threads");
     } catch (error) {
       console.error("[LocalStorage] Failed to save thread:", error);
       // Handle quota exceeded or other errors gracefully
@@ -58,23 +66,33 @@ export class LocalStorageThreadStorage implements ThreadStorage {
     
     try {
       const userThreadsKey = `${USER_THREADS_KEY}_${userId}`;
+      console.log("[LocalStorage] Getting threads for userId:", userId, "key:", userThreadsKey);
+      
       const threadIdsJson = localStorage.getItem(userThreadsKey);
       
-      if (!threadIdsJson) return [];
+      if (!threadIdsJson) {
+        console.log("[LocalStorage] No thread list found for userId:", userId);
+        return [];
+      }
       
       const threadIds: string[] = JSON.parse(threadIdsJson);
+      console.log("[LocalStorage] Found thread IDs:", threadIds);
+      
       const threads: ChatThread[] = [];
       
       for (const threadId of threadIds) {
         const thread = await this.getThread(threadId);
         if (thread) {
           threads.push(thread);
+        } else {
+          console.warn("[LocalStorage] Thread not found:", threadId);
         }
       }
       
       // Sort by lastMessageAt descending
       threads.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
       
+      console.log("[LocalStorage] Returning", threads.length, "threads");
       return threads;
     } catch (error) {
       console.error("[LocalStorage] Failed to get user threads:", error);

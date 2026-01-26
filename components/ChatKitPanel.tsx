@@ -386,6 +386,13 @@ export function ChatKitPanel({
           };
           
           threadStorage.saveThread(thread).then(() => {
+            if (isDev) {
+              console.log("[ChatKitPanel] Thread saved successfully:", {
+                threadId,
+                userId: currentUserId,
+                title: thread.title,
+              });
+            }
             // Dispatch storage event to notify ThreadList
             if (typeof window !== "undefined") {
               window.dispatchEvent(new Event("storage"));
@@ -393,7 +400,7 @@ export function ChatKitPanel({
               window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId } }));
             }
           }).catch(err => {
-            if (isDev) console.error("[ChatKitPanel] Failed to save thread:", err);
+            console.error("[ChatKitPanel] Failed to save thread:", err);
           });
         }
 
@@ -934,24 +941,57 @@ export function ChatKitPanel({
     });
   }
 
+  // Inject CSS to hide ChatKit's history button
+  useEffect(() => {
+    if (!isBrowser) return;
+    
+    const styleId = "hide-chatkit-history";
+    if (document.getElementById(styleId)) return; // Already added
+    
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      /* Hide ChatKit's built-in history button/clock icon */
+      openai-chatkit button[aria-label*="history" i],
+      openai-chatkit button[aria-label*="History" i],
+      openai-chatkit button[title*="history" i],
+      openai-chatkit button[title*="History" i],
+      openai-chatkit [class*="history-button"],
+      openai-chatkit [class*="thread-history"],
+      openai-chatkit [class*="threadHistory"],
+      openai-chatkit [class*="history"],
+      openai-chatkit button svg[viewBox*="12 6"],
+      openai-chatkit button:has(svg[viewBox*="12 6"]),
+      /* Hide clock/time icons */
+      openai-chatkit button:has(svg path[d*="M12 6"]),
+      openai-chatkit [class*="clock"],
+      openai-chatkit [class*="time"],
+      /* Hide the history panel/modal if it appears */
+      openai-chatkit [class*="history-panel"],
+      openai-chatkit [class*="thread-list"],
+      openai-chatkit [class*="threadList"],
+      openai-chatkit [class*="chat-history"],
+      /* Hide header buttons that might be history */
+      openai-chatkit header button:last-child,
+      openai-chatkit [role="button"][aria-label*="history" i] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+    
+    return () => {
+      const existingStyle = document.getElementById(styleId);
+      if (existingStyle) {
+        existingStyle.remove();
+      }
+    };
+  }, []);
+
   return (
     <div className="relative flex h-full w-full rounded-3xl flex-col overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shadow-2xl border border-white/20 dark:border-slate-700/50 transition-all duration-300">
-      {/* Hide ChatKit's built-in history button with CSS */}
-      <style jsx global>{`
-        openai-chatkit button[aria-label*="history" i],
-        openai-chatkit button[aria-label*="History" i],
-        openai-chatkit [class*="history-button"],
-        openai-chatkit [class*="thread-history"],
-        openai-chatkit [class*="threadHistory"] {
-          display: none !important;
-        }
-        /* Hide the history panel/modal if it appears */
-        openai-chatkit [class*="history-panel"],
-        openai-chatkit [class*="thread-list"],
-        openai-chatkit [class*="threadList"] {
-          display: none !important;
-        }
-      `}</style>
       
       <ChatKit
         key={widgetInstanceKey}
