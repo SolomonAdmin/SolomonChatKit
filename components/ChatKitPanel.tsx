@@ -28,7 +28,6 @@ type ChatKitPanelProps = {
   onWidgetAction: (action: FactAction) => Promise<void>;
   onResponseEnd: () => void;
   onThemeRequest: (scheme: ColorScheme) => void;
-  onShowThreadList?: () => void;
 };
 
 type ErrorState = {
@@ -53,7 +52,6 @@ export function ChatKitPanel({
   onWidgetAction,
   onResponseEnd,
   onThemeRequest,
-  onShowThreadList,
 }: ChatKitPanelProps) {
   const processedFacts = useRef(new Set<string>());
   const [errors, setErrors] = useState<ErrorState>(() => createInitialErrors());
@@ -141,8 +139,11 @@ export function ChatKitPanel({
       // Try to extract user message from event detail
       const detail = customEvent.detail;
       if (detail && typeof detail === "object") {
-        const role = (detail as any).role || (detail as any).messageRole;
-        const content = (detail as any).content || (detail as any).text || (detail as any).message;
+        const detailObj = detail as Record<string, unknown>;
+        const role = (detailObj.role as string | undefined) || (detailObj.messageRole as string | undefined);
+        const content = (detailObj.content as string | undefined) || 
+                       (detailObj.text as string | undefined) || 
+                       (detailObj.message as string | undefined);
         
         if (role === "user" && content && typeof content === "string" && content.trim()) {
           // Update thread title from message event
@@ -417,7 +418,7 @@ export function ChatKitPanel({
         }
       }
     },
-    [isWorkflowConfigured, setErrorState, workflowId, userId]
+    [isWorkflowConfigured, setErrorState, workflowId, userId, currentThreadId]
   );
 
   const chatkit = useChatKit({
@@ -519,6 +520,7 @@ export function ChatKitPanel({
       // If ChatKit provides thread info, sync it
       if (threadInfo?.threadId && userId) {
         const threadId = threadInfo.threadId;
+        const currentWorkflowId = workflowId; // Capture workflowId from closure
         setCurrentThreadId(threadId);
         if (typeof window !== "undefined") {
           localStorage.setItem("current_thread_id", threadId);
@@ -535,7 +537,7 @@ export function ChatKitPanel({
                 title: threadInfo.title || "New Conversation",
                 createdAt: Date.now(),
                 lastMessageAt: Date.now(),
-                workflowId: workflowId,
+                workflowId: currentWorkflowId,
               };
               threadStorage.saveThread(thread);
             } else if (threadInfo.title && existing.title !== threadInfo.title) {
@@ -753,7 +755,7 @@ export function ChatKitPanel({
     return () => {
       observer.disconnect();
     };
-  }, [chatkit.control, currentThreadId, userId]);
+  }, [chatkit.control, currentThreadId, userId, workflowId]);
 
   // Widget rendering: Parse widget JSON from text messages and render widgets
   useEffect(() => {
