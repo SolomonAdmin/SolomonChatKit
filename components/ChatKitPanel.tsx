@@ -137,6 +137,37 @@ export function ChatKitPanel({
           detail: customEvent.detail,
         });
       }
+      
+      // Try to extract user message from event detail
+      const detail = customEvent.detail;
+      if (detail && typeof detail === "object") {
+        const role = (detail as any).role || (detail as any).messageRole;
+        const content = (detail as any).content || (detail as any).text || (detail as any).message;
+        
+        if (role === "user" && content && typeof content === "string" && content.trim()) {
+          // Update thread title from message event
+          const storedThreadId = currentThreadId || 
+            (typeof window !== "undefined" ? localStorage.getItem("current_thread_id") : null);
+          
+          if (storedThreadId && !firstMessageRef.current) {
+            firstMessageRef.current = content;
+            const title = content.length > 50 ? content.slice(0, 50) + "..." : content;
+            
+            threadStorage.updateThread(storedThreadId, {
+              title: title,
+              lastMessagePreview: content.slice(0, 100),
+              lastMessageAt: Date.now(),
+            }).then(() => {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("storage"));
+                window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: storedThreadId } }));
+              }
+            }).catch(err => {
+              if (isDev) console.error("[ChatKitPanel] Failed to update thread from message event:", err);
+            });
+          }
+        }
+      }
     };
 
     // Add event listeners for various ChatKit events
@@ -151,7 +182,7 @@ export function ChatKitPanel({
       window.removeEventListener("chatkit-message", handleMessageEvent);
       window.removeEventListener("chatkit-thread-item", handleMessageEvent);
     };
-  }, []);
+  }, [currentThreadId]); // Add currentThreadId as dependency
 
   useEffect(() => {
     if (!isBrowser) {
@@ -283,6 +314,10 @@ export function ChatKitPanel({
         // Generate thread ID for this conversation
         const threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         setCurrentThreadId(threadId);
+        // Store in localStorage for event handlers
+        if (typeof window !== "undefined") {
+          localStorage.setItem("current_thread_id", threadId);
+        }
         firstMessageRef.current = null;
 
         const response = await fetch(CREATE_SESSION_ENDPOINT, {
@@ -406,6 +441,10 @@ export function ChatKitPanel({
     threadItemActions: {
       feedback: false,
     },
+    // Hide ChatKit's built-in history panel
+    header: {
+      threadHistory: false,
+    },
     onClientTool: async (invocation: {
       name: string;
       params: Record<string, unknown>;
@@ -475,6 +514,35 @@ export function ChatKitPanel({
     },
     onThreadChange: () => {
       processedFacts.current.clear();
+      // Reset first message ref when thread changes
+      firstMessageRef.current = null;
+    },
+    // Listen for messages to update thread titles
+    onMessage: (message: { role: string; content: string }) => {
+      if (message.role === "user" && currentThreadId && userId && !firstMessageRef.current) {
+        const messageText = typeof message.content === "string" ? message.content : String(message.content);
+        if (messageText.trim()) {
+          firstMessageRef.current = messageText;
+          const title = messageText.length > 50 ? messageText.slice(0, 50) + "..." : messageText;
+          
+          if (isDev) {
+            console.log("[ChatKitPanel] onMessage - Updating thread title:", title);
+          }
+          
+          threadStorage.updateThread(currentThreadId, {
+            title: title,
+            lastMessagePreview: messageText.slice(0, 100),
+            lastMessageAt: Date.now(),
+          }).then(() => {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new Event("storage"));
+              window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: currentThreadId } }));
+            }
+          }).catch(err => {
+            if (isDev) console.error("[ChatKitPanel] Failed to update thread title from onMessage:", err);
+          });
+        }
+      }
     },
     onError: ({ error }: { error: unknown }) => {
       // Check for domain verification errors
@@ -532,6 +600,10 @@ export function ChatKitPanel({
         firstMessageRef.current = messageText;
         const title = messageText.length > 50 ? messageText.slice(0, 50) + "..." : messageText;
         
+        if (isDev) {
+          console.log("[ChatKitPanel] Updating thread title:", title);
+        }
+        
         threadStorage.updateThread(currentThreadId!, {
           title: title,
           lastMessagePreview: messageText.slice(0, 100),
@@ -548,33 +620,86 @@ export function ChatKitPanel({
       }
     };
 
-    // Watch for user messages in ChatKit
+    // Watch for user messages in ChatKit - improved detection
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
           if (node.nodeType === Node.ELEMENT_NODE) {
             const element = node as Element;
-            // Look for user messages (typically have specific classes or attributes)
-            const userMessages = element.querySelectorAll?.('[class*="user"], [class*="User"], [data-role="user"]') || [];
-            userMessages.forEach((msgEl) => {
-              const text = msgEl.textContent?.trim();
-              if (text && text.length > 0) {
-                updateThreadFromMessage(text);
+            
+            // Try multiple selectors to find user messages
+            const selectors = [
+              '[class*="user-message"]',
+              '[class*="UserMessage"]',
+              '[class*="message"][class*="user"]',
+              '[data-role="user"]',
+              '[data-message-role="user"]',
+              '[aria-label*="user"]',
+              // ChatKit specific selectors
+              'div[class*="chatkit"][class*="message"]:not([class*="assistant"]):not([class*="system"])',
+            ];
+            
+            for (const selector of selectors) {
+              const userMessages = element.matches?.(selector) 
+                ? [element] 
+                : element.querySelectorAll?.(selector) || [];
+              
+              userMessages.forEach((msgEl) => {
+                // Get text content, excluding buttons and icons
+                const clone = msgEl.cloneNode(true) as Element;
+                clone.querySelectorAll?.('button, svg, [class*="icon"], [class*="button"]').forEach(el => el.remove());
+                const text = clone.textContent?.trim() || msgEl.textContent?.trim();
+                
+                if (text && text.length > 0 && text.length < 500) { // Reasonable message length
+                  if (isDev) {
+                    console.log("[ChatKitPanel] Found user message:", text.substring(0, 50));
+                  }
+                  updateThreadFromMessage(text);
+                }
+              });
+            }
+            
+            // Also check if the element itself contains user message text
+            if (element.textContent && element.textContent.trim().length > 0) {
+              // Check if it's likely a user message (not assistant/system)
+              const classes = element.className || '';
+              const isNotAssistant = !classes.includes('assistant') && 
+                                     !classes.includes('Assistant') &&
+                                     !classes.includes('system') &&
+                                     !classes.includes('System');
+              
+              if (isNotAssistant && element.textContent.trim().length < 500) {
+                const text = element.textContent.trim();
+                // Only update if it looks like a user message (not just UI text)
+                if (text.length > 5 && !text.includes('Loading') && !text.includes('Error')) {
+                  updateThreadFromMessage(text);
+                }
               }
-            });
+            }
           }
         });
       });
     });
 
-    const chatkitElement = document.querySelector("openai-chatkit");
-    if (chatkitElement) {
-      observer.observe(chatkitElement, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-    }
+    // Wait for ChatKit to render, then observe
+    const startObserving = () => {
+      const chatkitElement = document.querySelector("openai-chatkit");
+      if (chatkitElement) {
+        observer.observe(chatkitElement, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+        if (isDev) {
+          console.log("[ChatKitPanel] Started observing for user messages");
+        }
+      } else {
+        // Retry after a short delay
+        setTimeout(startObserving, 500);
+      }
+    };
+
+    startObserving();
 
     return () => {
       observer.disconnect();
@@ -811,30 +936,22 @@ export function ChatKitPanel({
 
   return (
     <div className="relative flex h-full w-full rounded-3xl flex-col overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shadow-2xl border border-white/20 dark:border-slate-700/50 transition-all duration-300">
-      {/* History Button */}
-      {onShowThreadList && (
-        <button
-          onClick={onShowThreadList}
-          className="absolute top-5 right-5 z-50 p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-          aria-label="Chat History"
-          title="Chat History"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={1.5}
-            stroke="currentColor"
-            className="w-5 h-5"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </button>
-      )}
+      {/* Hide ChatKit's built-in history button with CSS */}
+      <style jsx global>{`
+        openai-chatkit button[aria-label*="history" i],
+        openai-chatkit button[aria-label*="History" i],
+        openai-chatkit [class*="history-button"],
+        openai-chatkit [class*="thread-history"],
+        openai-chatkit [class*="threadHistory"] {
+          display: none !important;
+        }
+        /* Hide the history panel/modal if it appears */
+        openai-chatkit [class*="history-panel"],
+        openai-chatkit [class*="thread-list"],
+        openai-chatkit [class*="threadList"] {
+          display: none !important;
+        }
+      `}</style>
       
       <ChatKit
         key={widgetInstanceKey}
