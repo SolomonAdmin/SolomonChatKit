@@ -259,6 +259,12 @@ export function ChatKitPanel({
 
   const handleResetChat = useCallback(() => {
     processedFacts.current.clear();
+    // Clear current thread ID when resetting
+    setCurrentThreadId(null);
+    firstMessageRef.current = null;
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("current_thread_id");
+    }
     if (isBrowser) {
       setScriptStatus(
         window.customElements?.get("openai-chatkit") ? "ready" : "pending"
@@ -311,8 +317,21 @@ export function ChatKitPanel({
           setUserId(currentUserId);
         }
 
-        // Generate thread ID for this conversation
-        const threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        // Only generate new thread ID if we don't have one (not on every refresh)
+        // Check if there's an existing thread ID from a previous session
+        let threadId = currentThreadId;
+        if (!threadId && typeof window !== "undefined") {
+          const storedThreadId = localStorage.getItem("current_thread_id");
+          if (storedThreadId) {
+            threadId = storedThreadId;
+          } else {
+            // Only create new thread ID if explicitly starting new chat
+            threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          }
+        } else if (!threadId) {
+          threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        }
+        
         setCurrentThreadId(threadId);
         // Store in localStorage for event handlers
         if (typeof window !== "undefined") {
@@ -373,36 +392,9 @@ export function ChatKitPanel({
           throw new Error("Missing client secret in response");
         }
 
-        // Save thread when session is created
-        // Use local threadId variable instead of state (state updates are async)
-        if (threadId && currentUserId) {
-          const thread: ChatThread = {
-            threadId: threadId,
-            userId: currentUserId,
-            title: "New Conversation",
-            createdAt: Date.now(),
-            lastMessageAt: Date.now(),
-            workflowId: workflowId,
-          };
-          
-          threadStorage.saveThread(thread).then(() => {
-            if (isDev) {
-              console.log("[ChatKitPanel] Thread saved successfully:", {
-                threadId,
-                userId: currentUserId,
-                title: thread.title,
-              });
-            }
-            // Dispatch storage event to notify ThreadList
-            if (typeof window !== "undefined") {
-              window.dispatchEvent(new Event("storage"));
-              // Also dispatch a custom event for thread updates
-              window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId } }));
-            }
-          }).catch(err => {
-            console.error("[ChatKitPanel] Failed to save thread:", err);
-          });
-        }
+        // Don't create thread here - wait for first user message
+        // This prevents creating duplicate threads on page refresh
+        // Thread will be created when first message is detected
 
         if (isMountedRef.current) {
           setErrorState({ session: null, integration: null });
@@ -519,10 +511,40 @@ export function ChatKitPanel({
     onResponseStart: () => {
       setErrorState({ integration: null, retryable: false });
     },
-    onThreadChange: () => {
+    onThreadChange: (threadInfo?: { threadId?: string; title?: string }) => {
       processedFacts.current.clear();
       // Reset first message ref when thread changes
       firstMessageRef.current = null;
+      
+      // If ChatKit provides thread info, sync it
+      if (threadInfo?.threadId && userId) {
+        const threadId = threadInfo.threadId;
+        setCurrentThreadId(threadId);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("current_thread_id", threadId);
+        }
+        
+        // If thread has a title, update our storage
+        if (threadInfo.title) {
+          threadStorage.getThread(threadId).then(existing => {
+            if (!existing) {
+              // Create thread from ChatKit's info
+              const thread: ChatThread = {
+                threadId: threadId,
+                userId: userId,
+                title: threadInfo.title || "New Conversation",
+                createdAt: Date.now(),
+                lastMessageAt: Date.now(),
+                workflowId: workflowId,
+              };
+              threadStorage.saveThread(thread);
+            } else if (threadInfo.title && existing.title !== threadInfo.title) {
+              // Update title if different
+              threadStorage.updateThread(threadId, { title: threadInfo.title });
+            }
+          });
+        }
+      }
     },
     // Listen for messages to update thread titles
     onMessage: (message: { role: string; content: string }) => {
@@ -602,28 +624,48 @@ export function ChatKitPanel({
       return;
     }
 
-    const updateThreadFromMessage = (messageText: string) => {
-      if (!firstMessageRef.current && messageText.trim()) {
+    const updateThreadFromMessage = async (messageText: string) => {
+      if (!firstMessageRef.current && messageText.trim() && currentThreadId && userId) {
         firstMessageRef.current = messageText;
         const title = messageText.length > 50 ? messageText.slice(0, 50) + "..." : messageText;
         
         if (isDev) {
-          console.log("[ChatKitPanel] Updating thread title:", title);
+          console.log("[ChatKitPanel] Creating/updating thread from first message:", title);
         }
         
-        threadStorage.updateThread(currentThreadId!, {
-          title: title,
-          lastMessagePreview: messageText.slice(0, 100),
-          lastMessageAt: Date.now(),
-        }).then(() => {
-          // Dispatch storage event to notify ThreadList
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new Event("storage"));
-            window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: currentThreadId } }));
+        // Check if thread exists, if not create it
+        const existingThread = await threadStorage.getThread(currentThreadId);
+        
+        if (!existingThread) {
+          // Create new thread
+          const thread: ChatThread = {
+            threadId: currentThreadId,
+            userId: userId,
+            title: title,
+            createdAt: Date.now(),
+            lastMessageAt: Date.now(),
+            lastMessagePreview: messageText.slice(0, 100),
+            workflowId: workflowId,
+          };
+          
+          await threadStorage.saveThread(thread);
+          if (isDev) {
+            console.log("[ChatKitPanel] New thread created:", thread);
           }
-        }).catch(err => {
-          if (isDev) console.error("[ChatKitPanel] Failed to update thread title:", err);
-        });
+        } else {
+          // Update existing thread
+          await threadStorage.updateThread(currentThreadId, {
+            title: title,
+            lastMessagePreview: messageText.slice(0, 100),
+            lastMessageAt: Date.now(),
+          });
+        }
+        
+        // Dispatch storage event to notify ThreadList
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("storage"));
+          window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: currentThreadId } }));
+        }
       }
     };
 
@@ -962,10 +1004,16 @@ export function ChatKitPanel({
       openai-chatkit [class*="history"],
       openai-chatkit button svg[viewBox*="12 6"],
       openai-chatkit button:has(svg[viewBox*="12 6"]),
-      /* Hide clock/time icons */
+      /* Hide clock/time icons - more specific selectors */
       openai-chatkit button:has(svg path[d*="M12 6"]),
+      openai-chatkit button:has(svg path[d*="12 6"]),
       openai-chatkit [class*="clock"],
       openai-chatkit [class*="time"],
+      openai-chatkit button[aria-label*="time"],
+      openai-chatkit button[title*="time"],
+      openai-chatkit svg[viewBox*="24 24"]:has(path[d*="12 6"]),
+      /* Hide any button in header that might be history */
+      openai-chatkit header button:not(:first-child),
       /* Hide the history panel/modal if it appears */
       openai-chatkit [class*="history-panel"],
       openai-chatkit [class*="thread-list"],
