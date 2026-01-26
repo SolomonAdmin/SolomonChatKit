@@ -41,6 +41,56 @@ export function ThreadList({
     }
   }, [userId, currentThreadId, loadThreads]); // Reload when current thread changes
 
+  // Listen for storage events and thread updates to auto-refresh
+  useEffect(() => {
+    if (!userId) return;
+
+    let refreshTimeout: NodeJS.Timeout | null = null;
+
+    const handleStorageChange = () => {
+      // Debounce rapid updates
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      refreshTimeout = setTimeout(() => {
+        loadThreads();
+      }, 300);
+    };
+
+    const handleThreadUpdate = () => {
+      // Debounce rapid updates
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      refreshTimeout = setTimeout(() => {
+        loadThreads();
+      }, 300);
+    };
+
+    const handleVisibilityChange = () => {
+      // Refresh when page becomes visible (user switches back to tab)
+      if (document.visibilityState === "visible") {
+        loadThreads();
+      }
+    };
+
+    // Listen to storage events (when localStorage changes in other tabs)
+    window.addEventListener("storage", handleStorageChange);
+    // Listen to custom thread update events (same window)
+    window.addEventListener("threadUpdated", handleThreadUpdate);
+    // Refresh when tab becomes visible
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Periodic refresh as fallback (every 5 seconds)
+    const intervalId = setInterval(() => {
+      loadThreads();
+    }, 5000);
+
+    return () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("threadUpdated", handleThreadUpdate);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearInterval(intervalId);
+    };
+  }, [userId, loadThreads]);
+
   const handleDeleteThread = async (threadId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm("Delete this conversation?")) {

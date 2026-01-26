@@ -339,9 +339,10 @@ export function ChatKitPanel({
         }
 
         // Save thread when session is created
-        if (currentThreadId && currentUserId) {
+        // Use local threadId variable instead of state (state updates are async)
+        if (threadId && currentUserId) {
           const thread: ChatThread = {
-            threadId: currentThreadId,
+            threadId: threadId,
             userId: currentUserId,
             title: "New Conversation",
             createdAt: Date.now(),
@@ -349,7 +350,14 @@ export function ChatKitPanel({
             workflowId: workflowId,
           };
           
-          threadStorage.saveThread(thread).catch(err => {
+          threadStorage.saveThread(thread).then(() => {
+            // Dispatch storage event to notify ThreadList
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new Event("storage"));
+              // Also dispatch a custom event for thread updates
+              window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId } }));
+            }
+          }).catch(err => {
             if (isDev) console.error("[ChatKitPanel] Failed to save thread:", err);
           });
         }
@@ -444,6 +452,22 @@ export function ChatKitPanel({
       if (isDev) {
         console.info("[ChatKitPanel] Response ended - widgets should render automatically if configured in Agent Builder");
       }
+      
+      // Update thread's lastMessageAt when response ends
+      if (currentThreadId && userId) {
+        threadStorage.updateThread(currentThreadId, {
+          lastMessageAt: Date.now(),
+        }).then(() => {
+          // Notify ThreadList to refresh
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("storage"));
+            window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: currentThreadId } }));
+          }
+        }).catch(err => {
+          if (isDev) console.error("[ChatKitPanel] Failed to update thread:", err);
+        });
+      }
+      
       onResponseEnd();
     },
     onResponseStart: () => {
@@ -511,6 +535,13 @@ export function ChatKitPanel({
         threadStorage.updateThread(currentThreadId!, {
           title: title,
           lastMessagePreview: messageText.slice(0, 100),
+          lastMessageAt: Date.now(),
+        }).then(() => {
+          // Dispatch storage event to notify ThreadList
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("storage"));
+            window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: currentThreadId } }));
+          }
         }).catch(err => {
           if (isDev) console.error("[ChatKitPanel] Failed to update thread title:", err);
         });
