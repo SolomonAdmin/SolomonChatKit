@@ -508,40 +508,17 @@ export function ChatKitPanel({
     onResponseStart: () => {
       setErrorState({ integration: null, retryable: false });
     },
-    onThreadChange: (threadInfo?: { threadId?: string; title?: string }) => {
+    onThreadChange: (event: { threadId: string | null }) => {
       processedFacts.current.clear();
       // Reset first message ref when thread changes
       firstMessageRef.current = null;
-      
-      // If ChatKit provides thread info, sync it
-      if (threadInfo?.threadId && userId) {
-        const threadId = threadInfo.threadId;
-        const currentWorkflowId = workflowId; // Capture workflowId from closure
-        setCurrentThreadId(threadId);
-        if (typeof window !== "undefined") {
-          localStorage.setItem("current_thread_id", threadId);
-        }
-        
-        // If thread has a title, update our storage
-        if (threadInfo.title) {
-          threadStorage.getThread(threadId).then(existing => {
-            if (!existing) {
-              // Create thread from ChatKit's info
-              const thread: ChatThread = {
-                threadId: threadId,
-                userId: userId,
-                title: threadInfo.title || "New Conversation",
-                createdAt: Date.now(),
-                lastMessageAt: Date.now(),
-                workflowId: currentWorkflowId,
-              };
-              threadStorage.saveThread(thread);
-            } else if (threadInfo.title && existing.title !== threadInfo.title) {
-              // Update title if different
-              threadStorage.updateThread(threadId, { title: threadInfo.title });
-            }
-          });
-        }
+
+      const threadId = event.threadId;
+      setCurrentThreadId(threadId);
+      if (typeof window !== "undefined" && threadId) {
+        localStorage.setItem("current_thread_id", threadId);
+      } else if (typeof window !== "undefined") {
+        localStorage.removeItem("current_thread_id");
       }
     },
     // Listen for messages to update thread titles
