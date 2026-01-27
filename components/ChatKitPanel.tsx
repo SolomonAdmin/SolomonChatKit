@@ -441,10 +441,6 @@ export function ChatKitPanel({
     threadItemActions: {
       feedback: false,
     },
-    // Hide ChatKit's built-in history panel
-    header: {
-      threadHistory: false,
-    },
     onClientTool: async (invocation: {
       name: string;
       params: Record<string, unknown>;
