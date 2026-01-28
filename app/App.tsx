@@ -43,7 +43,9 @@ export default function App() {
 
   const handleNewThread = useCallback(() => {
     setCurrentThreadId(null);
-    // Force chat reset by reloading or using a key
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("current_thread_id");
+    }
     window.location.reload();
   }, []);
 

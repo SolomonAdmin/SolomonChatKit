@@ -318,23 +318,23 @@ export function ChatKitPanel({
           setUserId(currentUserId);
         }
 
-        // Only generate new thread ID if we don't have one (not on every refresh)
-        // Check if there's an existing thread ID from a previous session
+        // New conversation = no stored thread id (e.g. user clicked "+ New Chat" or first visit)
         let threadId = currentThreadId;
-        if (!threadId && typeof window !== "undefined") {
+        let isNewConversation = false;
+        if (typeof window !== "undefined") {
           const storedThreadId = localStorage.getItem("current_thread_id");
           if (storedThreadId) {
             threadId = storedThreadId;
           } else {
-            // Only create new thread ID if explicitly starting new chat
             threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            isNewConversation = true;
           }
         } else if (!threadId) {
           threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          isNewConversation = true;
         }
         
         setCurrentThreadId(threadId);
-        // Store in localStorage for event handlers
         if (typeof window !== "undefined") {
           localStorage.setItem("current_thread_id", threadId);
         }
@@ -393,9 +393,25 @@ export function ChatKitPanel({
           throw new Error("Missing client secret in response");
         }
 
-        // Don't create thread here - wait for first user message
-        // This prevents creating duplicate threads on page refresh
-        // Thread will be created when first message is detected
+        // Save thread only for new conversations so it appears in left panel (use same userId as App)
+        const uidForStorage = typeof window !== "undefined"
+          ? (localStorage.getItem("chatkit_user_id") || currentUserId)
+          : currentUserId;
+        if (isNewConversation && threadId && uidForStorage) {
+          const thread: ChatThread = {
+            threadId,
+            userId: uidForStorage,
+            title: "New conversation",
+            createdAt: Date.now(),
+            lastMessageAt: Date.now(),
+            workflowId: workflowId,
+          };
+          threadStorage.saveThread(thread).then(() => {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId } }));
+            }
+          }).catch((err) => console.error("[ChatKitPanel] Failed to save thread:", err));
+        }
 
         if (isMountedRef.current) {
           setErrorState({ session: null, integration: null });
@@ -483,26 +499,46 @@ export function ChatKitPanel({
       return { success: false };
     },
     onResponseEnd: () => {
-      // Enhanced logging to track widget data for debugging
       if (isDev) {
-        console.info("[ChatKitPanel] Response ended - widgets should render automatically if configured in Agent Builder");
+        console.info("[ChatKitPanel] Response ended");
       }
-      
-      // Update thread's lastMessageAt when response ends
-      if (currentThreadId && userId) {
-        threadStorage.updateThread(currentThreadId, {
-          lastMessageAt: Date.now(),
-        }).then(() => {
-          // Notify ThreadList to refresh
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new Event("storage"));
-            window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: currentThreadId } }));
+
+      const tid = currentThreadId ?? (typeof window !== "undefined" ? localStorage.getItem("current_thread_id") : null);
+      const uid = userId ?? (typeof window !== "undefined" ? localStorage.getItem("chatkit_user_id") : null);
+
+      // Fallback: if we still don't have a title, scan DOM for user message after render
+      if (tid && uid && !firstMessageRef.current && typeof window !== "undefined") {
+        setTimeout(() => {
+          if (firstMessageRef.current) return;
+          const root = document.querySelector("openai-chatkit");
+          if (!root) return;
+          const possible = root.querySelectorAll('[class*="user"], [class*="User"], [class*="human"], [class*="message"]');
+          for (const el of Array.from(possible)) {
+            const text = (el as HTMLElement).innerText?.trim() || (el as HTMLElement).textContent?.trim();
+            if (text && text.length > 5 && text.length < 500 && !/^(Thought|Loading|Error)/i.test(text)) {
+              firstMessageRef.current = text;
+              const title = text.length > 50 ? text.slice(0, 50) + "…" : text;
+              threadStorage.updateThread(tid, {
+                title,
+                lastMessagePreview: text.slice(0, 100),
+                lastMessageAt: Date.now(),
+              }).then(() => {
+                window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: tid } }));
+              }).catch(() => {});
+              break;
+            }
           }
-        }).catch(err => {
-          if (isDev) console.error("[ChatKitPanel] Failed to update thread:", err);
-        });
+        }, 800);
       }
-      
+
+      if (tid) {
+        threadStorage.updateThread(tid, { lastMessageAt: Date.now() }).then(() => {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: tid } }));
+          }
+        }).catch(() => {});
+      }
+
       onResponseEnd();
     },
     onResponseStart: () => {
