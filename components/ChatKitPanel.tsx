@@ -25,6 +25,10 @@ export type FactAction = {
 
 type ChatKitPanelProps = {
   theme: ColorScheme;
+  /** Thread id selected in the left sidebar. When this changes, we call setThreadId so that thread loads. */
+  selectedThreadId: string | null;
+  /** Called when ChatKit’s current thread becomes a new thread we created (e.g. after "+ New Chat"). */
+  onCurrentThreadChange?: (threadId: string) => void;
   onWidgetAction: (action: FactAction) => Promise<void>;
   onResponseEnd: () => void;
   onThemeRequest: (scheme: ColorScheme) => void;
@@ -85,6 +89,8 @@ const createInitialErrors = (): ErrorState => ({
 
 export function ChatKitPanel({
   theme,
+  selectedThreadId,
+  onCurrentThreadChange,
   onWidgetAction,
   onResponseEnd,
   onThemeRequest,
@@ -591,15 +597,58 @@ export function ChatKitPanel({
     },
     onThreadChange: (event: { threadId: string | null }) => {
       processedFacts.current.clear();
-      // Reset first message ref when thread changes
       firstMessageRef.current = null;
 
-      const threadId = event.threadId;
-      setCurrentThreadId(threadId);
-      if (typeof window !== "undefined" && threadId) {
-        localStorage.setItem("current_thread_id", threadId);
-      } else if (typeof window !== "undefined") {
+      const chatkitThreadId = event.threadId; // ChatKit’s id (e.g. cthr_xxx)
+      const ourThreadId =
+        typeof window !== "undefined"
+          ? localStorage.getItem("current_thread_id")
+          : null;
+
+      if (ourThreadId && chatkitThreadId) {
+        // We have an existing “our” thread; store ChatKit’s id so we can load this thread when the user clicks it.
+        threadStorage
+          .updateThread(ourThreadId, { chatkitThreadId })
+          .then(() => {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent("threadUpdated", { detail: { threadId: ourThreadId } })
+              );
+            }
+          })
+          .catch(() => {});
+        setCurrentThreadId(ourThreadId);
+      } else if (chatkitThreadId && !ourThreadId) {
+        // User had clicked “+ New Chat”; ChatKit created a new thread. Create our thread and tell App.
+        const uid =
+          typeof window !== "undefined"
+            ? localStorage.getItem("chatkit_user_id")
+            : null;
+        if (uid) {
+          const newOurId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          const thread: ChatThread = {
+            threadId: newOurId,
+            userId: uid,
+            title: "New conversation",
+            createdAt: Date.now(),
+            lastMessageAt: Date.now(),
+            workflowId: workflowId,
+            chatkitThreadId,
+          };
+          threadStorage.saveThread(thread).then(() => {
+            if (typeof window !== "undefined") {
+              localStorage.setItem("current_thread_id", newOurId);
+              window.dispatchEvent(
+                new CustomEvent("threadUpdated", { detail: { threadId: newOurId } })
+              );
+            }
+            setCurrentThreadId(newOurId);
+            onCurrentThreadChange?.(newOurId);
+          }).catch(() => {});
+        }
+      } else if (!chatkitThreadId && typeof window !== "undefined") {
         localStorage.removeItem("current_thread_id");
+        setCurrentThreadId(null);
       }
     },
     onError: ({ error }: { error: unknown }) => {
@@ -646,6 +695,22 @@ export function ChatKitPanel({
       }
     },
   });
+
+  // When the user clicks a thread in the left sidebar, load that thread in ChatKit (or start new thread if null).
+  useEffect(() => {
+    if (!chatkit.control || typeof chatkit.setThreadId !== "function") return;
+    if (selectedThreadId === null) {
+      void chatkit.setThreadId(null);
+      return;
+    }
+    if (selectedThreadId) {
+      threadStorage.getThread(selectedThreadId).then((thread) => {
+        if (thread?.chatkitThreadId) {
+          void chatkit.setThreadId(thread.chatkitThreadId!);
+        }
+      });
+    }
+  }, [selectedThreadId, chatkit]);
 
   // Track user messages to update thread titles
   useEffect(() => {

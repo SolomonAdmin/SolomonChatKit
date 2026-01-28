@@ -22,14 +22,13 @@ export default function App() {
     }
   }, []);
 
-  // Load userId from localStorage or generate new one
+  // Load userId and currentThreadId from localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       const storedUserId = localStorage.getItem("chatkit_user_id");
       if (storedUserId) {
         setUserId(storedUserId);
       } else {
-        // Generate new userId if one doesn't exist
         const newUserId =
           typeof window.crypto !== "undefined" &&
           typeof window.crypto.randomUUID === "function"
@@ -37,6 +36,10 @@ export default function App() {
             : `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         localStorage.setItem("chatkit_user_id", newUserId);
         setUserId(newUserId);
+      }
+      const storedThreadId = localStorage.getItem("current_thread_id");
+      if (storedThreadId) {
+        setCurrentThreadId(storedThreadId);
       }
     }
   }, []);
@@ -46,14 +49,15 @@ export default function App() {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("current_thread_id");
     }
-    window.location.reload();
+    // No reload — ChatKitPanel will call setThreadId(null) and ChatKit starts a new thread
   }, []);
 
   const handleSelectThread = useCallback((threadId: string) => {
     setCurrentThreadId(threadId);
-    // Note: ChatKit manages threads internally via session IDs
-    // For now, we'll need to reload to start fresh - can enhance later
-    window.location.reload();
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("current_thread_id", threadId);
+    }
+    // ChatKitPanel receives selectedThreadId and calls setThreadId(thread.chatkitThreadId) so that thread loads
   }, []);
 
   return (
@@ -112,6 +116,8 @@ export default function App() {
           <div className="h-full max-w-7xl mx-auto">
             <ChatKitPanel
               theme={scheme}
+              selectedThreadId={currentThreadId}
+              onCurrentThreadChange={setCurrentThreadId}
               onWidgetAction={handleWidgetAction}
               onResponseEnd={handleResponseEnd}
               onThemeRequest={setScheme}

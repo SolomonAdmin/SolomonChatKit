@@ -9,6 +9,8 @@ export interface ChatThread {
   lastMessageAt: number; // timestamp
   lastMessagePreview?: string;
   workflowId: string;
+  /** ChatKit’s thread id (e.g. cthr_xxx). Used to load that conversation when user clicks the thread in the sidebar. */
+  chatkitThreadId?: string;
 }
 
 /**
