@@ -40,6 +40,42 @@ type ErrorState = {
 const isBrowser = typeof window !== "undefined";
 const isDev = process.env.NODE_ENV !== "production";
 
+/** Recursively query selector inside root and all nested shadow roots */
+function queryAllIncludingShadow(root: Element, selector: string): Element[] {
+  const out: Element[] = [];
+  try {
+    root.querySelectorAll(selector).forEach((el) => out.push(el));
+    const sr = (root as Element & { shadowRoot?: ShadowRoot }).shadowRoot;
+    if (sr) {
+      sr.querySelectorAll(selector).forEach((el) => out.push(el));
+      sr.querySelectorAll("*").forEach((child) => {
+        queryAllIncludingShadow(child, selector).forEach((el) => out.push(el));
+      });
+    }
+  } catch {
+    // ignore
+  }
+  return out;
+}
+
+/** Recursively append style into root and every nested shadow root */
+function injectStyleIntoShadowRoots(root: Element, css: string): void {
+  const style = document.createElement("style");
+  style.textContent = css;
+  root.appendChild(style);
+  const sr = (root as Element & { shadowRoot?: ShadowRoot }).shadowRoot;
+  if (sr) {
+    const s = document.createElement("style");
+    s.textContent = css;
+    sr.appendChild(s);
+    sr.querySelectorAll("*").forEach((child) => {
+      if ((child as Element & { shadowRoot?: ShadowRoot }).shadowRoot) {
+        injectStyleIntoShadowRoots(child, css);
+      }
+    });
+  }
+}
+
 const createInitialErrors = (): ErrorState => ({
   script: null,
   session: null,
@@ -506,16 +542,24 @@ export function ChatKitPanel({
       const tid = currentThreadId ?? (typeof window !== "undefined" ? localStorage.getItem("current_thread_id") : null);
       const uid = userId ?? (typeof window !== "undefined" ? localStorage.getItem("chatkit_user_id") : null);
 
-      // Fallback: if we still don't have a title, scan DOM for user message after render
+      // Fallback: if we still don't have a title, scan DOM (including shadow) for user message
       if (tid && uid && !firstMessageRef.current && typeof window !== "undefined") {
-        setTimeout(() => {
+        const runScan = () => {
           if (firstMessageRef.current) return;
           const root = document.querySelector("openai-chatkit");
           if (!root) return;
-          const possible = root.querySelectorAll('[class*="user"], [class*="User"], [class*="human"], [class*="message"]');
-          for (const el of Array.from(possible)) {
-            const text = (el as HTMLElement).innerText?.trim() || (el as HTMLElement).textContent?.trim();
-            if (text && text.length > 5 && text.length < 500 && !/^(Thought|Loading|Error)/i.test(text)) {
+          const selectors = [
+            '[class*="user"]', '[class*="User"]', '[class*="human"]',
+            '[class*="message"]', '[class*="content"]', '[role="article"]',
+            'p', '[data-role="user"]', 'div[class*="bubble"]', '[class*="turn"]',
+          ];
+          for (const sel of selectors) {
+            const possible = queryAllIncludingShadow(root, sel);
+            for (const el of possible) {
+              const text = (el as HTMLElement).innerText?.trim() || (el as HTMLElement).textContent?.trim() || "";
+              if (text.length < 6 || text.length > 400) continue;
+              if (/^(Thought|Loading|Error|Yes\.|No\.)/i.test(text)) continue;
+              if (/^(How can I|What can you|I can help)/i.test(text)) continue;
               firstMessageRef.current = text;
               const title = text.length > 50 ? text.slice(0, 50) + "…" : text;
               threadStorage.updateThread(tid, {
@@ -525,10 +569,11 @@ export function ChatKitPanel({
               }).then(() => {
                 window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: tid } }));
               }).catch(() => {});
-              break;
+              return;
             }
           }
-        }, 800);
+        };
+        [800, 1500, 2500].forEach((ms) => setTimeout(runScan, ms));
       }
 
       if (tid) {
@@ -967,60 +1012,49 @@ export function ChatKitPanel({
     });
   }
 
-  // Inject CSS to hide ChatKit's history button
+  // Global CSS for light-DOM (backup)
   useEffect(() => {
     if (!isBrowser) return;
-    
     const styleId = "hide-chatkit-history";
-    if (document.getElementById(styleId)) return; // Already added
-    
+    if (document.getElementById(styleId)) return;
     const style = document.createElement("style");
     style.id = styleId;
     style.textContent = `
-      /* Hide ChatKit's built-in history button/clock icon */
-      openai-chatkit button[aria-label*="history" i],
-      openai-chatkit button[aria-label*="History" i],
-      openai-chatkit button[title*="history" i],
-      openai-chatkit button[title*="History" i],
-      openai-chatkit [class*="history-button"],
-      openai-chatkit [class*="thread-history"],
-      openai-chatkit [class*="threadHistory"],
-      openai-chatkit [class*="history"],
-      openai-chatkit button svg[viewBox*="12 6"],
-      openai-chatkit button:has(svg[viewBox*="12 6"]),
-      /* Hide clock/time icons - more specific selectors */
-      openai-chatkit button:has(svg path[d*="M12 6"]),
-      openai-chatkit button:has(svg path[d*="12 6"]),
-      openai-chatkit [class*="clock"],
-      openai-chatkit [class*="time"],
-      openai-chatkit button[aria-label*="time"],
-      openai-chatkit button[title*="time"],
-      openai-chatkit svg[viewBox*="24 24"]:has(path[d*="12 6"]),
-      /* Hide any button in header that might be history */
-      openai-chatkit header button:not(:first-child),
-      /* Hide the history panel/modal if it appears */
-      openai-chatkit [class*="history-panel"],
-      openai-chatkit [class*="thread-list"],
-      openai-chatkit [class*="threadList"],
-      openai-chatkit [class*="chat-history"],
-      /* Hide header buttons that might be history */
-      openai-chatkit header button:last-child,
-      openai-chatkit [role="button"][aria-label*="history" i] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-      }
+      openai-chatkit button[aria-label*="history" i], openai-chatkit button[aria-label*="History" i],
+      openai-chatkit [class*="history"] button, openai-chatkit header button:not(:first-of-type),
+      openai-chatkit header button:last-of-type { display: none !important; }
     `;
     document.head.appendChild(style);
-    
-    return () => {
-      const existingStyle = document.getElementById(styleId);
-      if (existingStyle) {
-        existingStyle.remove();
+    return () => { document.getElementById(styleId)?.remove(); };
+  }, []);
+
+  // Pierce shadow DOM to hide history/clock button (ChatKit renders inside shadow)
+  useEffect(() => {
+    if (!isBrowser || !chatkit.control) return;
+    const shadowCss = `
+      button[aria-label*="history" i], button[aria-label*="History" i], button[title*="history" i], button[title*="History" i],
+      button[aria-label*="time" i], button[title*="time" i], [class*="history"] button, [class*="thread-history"] button,
+      header button:not(:first-of-type), header button:last-of-type, [class*="clock"] { display: none !important; }
+    `;
+    let tries = 0;
+    const tryInject = () => {
+      const host = document.querySelector("openai-chatkit");
+      const sr = host ? (host as Element & { shadowRoot?: ShadowRoot }).shadowRoot : null;
+      if (sr) {
+        if (!sr.querySelector("#hide-chatkit-clock")) {
+          const s = document.createElement("style");
+          s.id = "hide-chatkit-clock";
+          s.textContent = shadowCss;
+          sr.appendChild(s);
+        }
+      } else if (tries < 20) {
+        tries += 1;
+        setTimeout(tryInject, 300);
       }
     };
-  }, []);
+    const t = setTimeout(tryInject, 500);
+    return () => clearTimeout(t);
+  }, [chatkit.control]);
 
   return (
     <div className="relative flex h-full w-full rounded-3xl flex-col overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shadow-2xl border border-white/20 dark:border-slate-700/50 transition-all duration-300">
