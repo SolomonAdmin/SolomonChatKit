@@ -521,33 +521,6 @@ export function ChatKitPanel({
         localStorage.removeItem("current_thread_id");
       }
     },
-    // Listen for messages to update thread titles
-    onMessage: (message: { role: string; content: string }) => {
-      if (message.role === "user" && currentThreadId && userId && !firstMessageRef.current) {
-        const messageText = typeof message.content === "string" ? message.content : String(message.content);
-        if (messageText.trim()) {
-          firstMessageRef.current = messageText;
-          const title = messageText.length > 50 ? messageText.slice(0, 50) + "..." : messageText;
-          
-          if (isDev) {
-            console.log("[ChatKitPanel] onMessage - Updating thread title:", title);
-          }
-          
-          threadStorage.updateThread(currentThreadId, {
-            title: title,
-            lastMessagePreview: messageText.slice(0, 100),
-            lastMessageAt: Date.now(),
-          }).then(() => {
-            if (typeof window !== "undefined") {
-              window.dispatchEvent(new Event("storage"));
-              window.dispatchEvent(new CustomEvent("threadUpdated", { detail: { threadId: currentThreadId } }));
-            }
-          }).catch(err => {
-            if (isDev) console.error("[ChatKitPanel] Failed to update thread title from onMessage:", err);
-          });
-        }
-      }
-    },
     onError: ({ error }: { error: unknown }) => {
       // Check for domain verification errors
       const isDomainVerificationError =
